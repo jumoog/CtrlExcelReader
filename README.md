@@ -1,0 +1,87 @@
+# WinCC OA CTRL Extension for Excel
+
+A WinCC OA CTRL extension that adds `.xlsx` file reading capabilities using [xlsxio](https://github.com/brechtsanders/xlsxio).
+
+## CTRL Functions
+
+### `excelGetSheetNames`
+
+```ctrl
+dyn_string excelGetSheetNames(string filename)
+```
+
+Returns the names of all sheets in the given `.xlsx` file.
+
+```ctrl
+dyn_string sheets = excelGetSheetNames("C:/data/report.xlsx");
+// sheets = {"Sheet1", "Sheet2", "Summary"}
+```
+
+### `excelReadSheet`
+
+```ctrl
+dyn_mapping excelReadSheet(string filename, string sheetName, bool skipHiddenRows)
+```
+
+Reads a sheet and returns each data row as a `mapping`. The first row is used as column headers (mapping keys). The `skipHiddenRows` parameter is optional and defaults to `TRUE`.
+
+Pass an empty string for `sheetName` to read the first sheet.
+
+Cell values are automatically typed:
+
+- Integers → `int`
+- Decimals → `float`
+- Everything else → `string`
+
+```ctrl
+// Read the first sheet, skip hidden rows (default)
+dyn_mapping rows = excelReadSheet("C:/data/report.xlsx", "");
+
+// Read a specific sheet, include hidden rows
+dyn_mapping rows = excelReadSheet("C:/data/report.xlsx", "Sheet2", FALSE);
+
+// Given an Excel sheet:
+//   | Name  | Age | Score |
+//   | Alice | 30  | 95.5  |
+//   | Bob   | 25  | 87.0  |
+
+DebugN(rows[1]["Name"]);   // "Alice"  (string)
+DebugN(rows[1]["Age"]);    // 30       (int)
+DebugN(rows[1]["Score"]);  // 95.5     (float)
+```
+
+## Build
+
+### Prerequisites
+
+- WinCC OA 3.20 API
+- [vcpkg](https://github.com/microsoft/vcpkg)
+- CMake 3.15+
+- Visual Studio (Windows)
+
+### Install dependencies
+
+```sh
+vcpkg install --triplet x64-windows-static-md
+```
+
+### Configure and build
+
+```sh
+cmake -B build ^
+  -DCMAKE_TOOLCHAIN_FILE=C:/Repos/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+
+cmake --build build --config RelWithDebInfo
+```
+
+### Install
+
+Copy the built `Ctrl_TEMPLATE.dll` from `build/RelWithDebInfo/` into your WinCC OA project's `bin/` directory.
+
+Add the extension to your WinCC OA config file:
+
+```text
+[ctrl]
+LoadCtrlLibs = "Ctrl_TEMPLATE"
+```
