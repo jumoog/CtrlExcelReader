@@ -1,0 +1,18 @@
+Ctrl Extension Template
+
+These files are a base framework for a new WinCC OA Ctrl Extension.
+The tool newPVSSCtrlExt in $API_ROOT creates a new Ctrl Extension project
+by creating implementation files based on these files
+
+What you have to do then is simply check all
+// TODO
+comments in the files and fill in your real implementations.
+
+(Even without any modification you have already a compilable
+ and runable new WinCC OA Ctrl Extension, with a simple
+ add(a, b, sum) function)
+
+To install copy the compiled Ctrl Extension (*.so or *.dll)
+into your projects "bin" directory
+
+Enjoy!
