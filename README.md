@@ -50,6 +50,24 @@ DebugN(rows[1]["Age"]);    // 30       (int)
 DebugN(rows[1]["Score"]);  // 95.5     (float)
 ```
 
+### `excelReadFile`
+
+```ctrl
+dyn_dyn_mapping excelReadFile(string filename, bool skipHiddenRows)
+```
+
+Reads all sheets in the file at once. Returns a `dyn_dyn_mapping` where each element is one sheet (a `dyn_mapping` of rows). The `skipHiddenRows` parameter is optional and defaults to `TRUE`.
+
+Use `excelGetSheetNames` to map sheet indices to names.
+
+```ctrl
+dyn_dyn_mapping allSheets = excelReadFile("C:/data/report.xlsx");
+
+// allSheets[1] = first sheet rows, allSheets[2] = second sheet rows, ...
+DebugN(allSheets[1][1]["Name"]);  // first row of first sheet
+DebugN(allSheets[2][1]["Name"]);  // first row of second sheet
+```
+
 ## Build
 
 ### Prerequisites
