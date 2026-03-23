@@ -183,6 +183,9 @@ static bool writeSheetData(xlsxiowriter writer, const DynVar &data)
   if ( numRows == 0 )
     return true;
 
+  xlsxiowrite_set_detection_rows(writer, numRows);
+  xlsxiowrite_set_row_height(writer, 1);
+
   Variable *firstRowVar = data.getAt(0);
   if ( !firstRowVar || firstRowVar->isA() != MAPPING_VAR )
     return false;
