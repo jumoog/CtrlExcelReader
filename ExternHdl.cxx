@@ -2,10 +2,12 @@
 
 #include <DynVar.hxx>
 #include <FloatVar.hxx>
+#include <LongVar.hxx>
 #include <MappingVar.hxx>
 #include <TimeVar.hxx>
 
 #include <xlsxio_read.h>
+#include <xlsxio_write.h>
 
 #include <cstdlib>
 #include <climits>
@@ -127,11 +129,112 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result, bool useHeade
   }
 }
 
+//------------------------------------------------------------------------------
+
+// Write a single cell value, choosing the xlsxio call by WinCC OA Variable type.
+static void writeTypedCell(xlsxiowriter writer, const Variable *val)
+{
+  if ( !val )
+  {
+    xlsxiowrite_add_cell_string(writer, "");
+    return;
+  }
+
+  switch ( val->isA() )
+  {
+    case INTEGER_VAR:
+      xlsxiowrite_add_cell_int(writer, static_cast<int64_t>(
+        static_cast<const IntegerVar *>(val)->getValue()));
+      return;
+    case LONG_VAR:
+      xlsxiowrite_add_cell_int(writer, static_cast<int64_t>(
+        static_cast<const LongVar *>(val)->getValue()));
+      return;
+    case FLOAT_VAR:
+      xlsxiowrite_add_cell_float(writer,
+        static_cast<const FloatVar *>(val)->getValue());
+      return;
+    case BIT_VAR:
+      xlsxiowrite_add_cell_int(writer,
+        static_cast<const BitVar *>(val)->isTrue() ? 1 : 0);
+      return;
+    case TIME_VAR:
+      xlsxiowrite_add_cell_datetime(writer, static_cast<time_t>(
+        static_cast<const TimeVar *>(val)->getSeconds()));
+      return;
+    case TEXT_VAR:
+      xlsxiowrite_add_cell_string(writer,
+        static_cast<const TextVar *>(val)->getValue());
+      return;
+    default:
+    {
+      CharString str = val->formatValue(CharString());
+      xlsxiowrite_add_cell_string(writer, str.c_str());
+      return;
+    }
+  }
+}
+
+// Write a dyn_mapping (array of row-mappings) to an already-opened xlsxio writer.
+// Column headers are taken from the keys of the first mapping row.
+static bool writeSheetData(xlsxiowriter writer, const DynVar &data)
+{
+  unsigned int numRows = data.getNumberOfItems();
+  if ( numRows == 0 )
+    return true;
+
+  Variable *firstRowVar = data.getAt(0);
+  if ( !firstRowVar || firstRowVar->isA() != MAPPING_VAR )
+    return false;
+
+  const MappingVar *firstRow = static_cast<const MappingVar *>(firstRowVar);
+  unsigned int numCols = firstRow->getNumberOfItems();
+  if ( numCols == 0 )
+    return true;
+
+  // Collect column keys from the first row
+  std::vector<Variable *> columnKeys;
+  columnKeys.reserve(numCols);
+  for ( unsigned int c = 0; c < numCols; c++ )
+    columnKeys.push_back(firstRow->getKey(c));
+
+  // Write column headers
+  for ( Variable *key : columnKeys )
+  {
+    CharString keyStr = key->formatValue(CharString());
+    xlsxiowrite_add_column(writer, keyStr.c_str(), 0);
+  }
+  xlsxiowrite_next_row(writer);
+
+  // Write data rows
+  for ( unsigned int r = 0; r < numRows; r++ )
+  {
+    Variable *rowVar = data.getAt(r);
+    if ( !rowVar || rowVar->isA() != MAPPING_VAR )
+    {
+      xlsxiowrite_next_row(writer);
+      continue;
+    }
+
+    const MappingVar *row = static_cast<const MappingVar *>(rowVar);
+    for ( Variable *key : columnKeys )
+    {
+      Variable *cellVal = row->getAt(*key);
+      writeTypedCell(writer, cellVal);
+    }
+    xlsxiowrite_next_row(writer);
+  }
+
+  return true;
+}
+
 static FunctionListRec fnList[] =
 {
   { DYNTEXT_VAR,       "excelGetSheetNames", "(string filename)",                                                                          false },
   { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)", false },
-  { DYNDYNMAPPING_VAR, "excelReadFile",      "(string filename, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)",                   false },
+  { MAPPING_VAR,       "excelReadFile",      "(string filename, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)",                   false },
+  { BIT_VAR,           "excelWriteSheet",    "(string filename, string sheetName, dyn_mapping data)",                                              false },
+  { BIT_VAR,           "excelWriteFile",     "(string filename, mapping data)",                                                                    false },
 };
 
 CTRL_EXTENSION(ExternHdl, fnList)
@@ -145,11 +248,14 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
     F_excelGetSheetNames = 0,
     F_excelReadSheet     = 1,
     F_excelReadFile      = 2,
+    F_excelWriteSheet    = 3,
+    F_excelWriteFile     = 4,
   };
 
   static DynVar dynTextResult;
   static DynVar dynMappingResult;
-  static DynVar dynDynMappingResult;
+  static MappingVar mappingResult;
+  static BitVar writeResult;
 
   switch ( param.funcNum )
   {
@@ -246,13 +352,14 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
     }
 
     // -------------------------------------------------------------------------
-    // excelReadFile(string filename, bool skipHiddenRows) -> dyn_dyn_mapping
-    // Reads all sheets in the file. Each sheet becomes a dyn_mapping of rows.
-    // skipHiddenRows is optional and defaults to TRUE.
+    // excelReadFile(string filename, bool skipHiddenRows, bool firstRowIsColumnNames)
+    //   -> mapping
+    // Reads all sheets. Returns a mapping where keys are sheet names
+    // and values are dyn_mapping (rows).
     case F_excelReadFile:
     {
       param.thread->clearLastError();
-      dynDynMappingResult.reset(DYNMAPPING_VAR);
+      mappingResult = MappingVar();
 
       TextVar filenameVar;
       filenameVar = *(param.args->getFirst()->evaluate(param.thread));
@@ -277,7 +384,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
 
       xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
       if ( !reader )
-        return &dynDynMappingResult;
+        return &mappingResult;
 
       // Collect sheet names
       std::vector<std::string> sheetNames;
@@ -302,11 +409,94 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         readSheetRows(sheet, sheetDyn, useHeaders);
         xlsxioread_sheet_close(sheet);
 
-        dynDynMappingResult.append(sheetDyn);
+        mappingResult.setAt(TextVar(sn.c_str()), sheetDyn);
       }
 
       xlsxioread_close(reader);
-      return &dynDynMappingResult;
+      return &mappingResult;
+    }
+
+    // -------------------------------------------------------------------------
+    // excelWriteSheet(string filename, string sheetName, dyn_mapping data)
+    //   -> bool
+    // Writes a dyn_mapping to a single-sheet .xlsx file.
+    // Mapping keys from the first row become column headers.
+    case F_excelWriteSheet:
+    {
+      param.thread->clearLastError();
+      writeResult = BitVar(false);
+
+      TextVar filenameVar, sheetnameVar;
+      filenameVar  = *(param.args->getFirst()->evaluate(param.thread));
+      sheetnameVar = *(param.args->getNext() ->evaluate(param.thread));
+
+      DynVar dataVar;
+      dataVar = *(param.args->getNext()->evaluate(param.thread));
+
+      const char *sheetname = sheetnameVar.getValue();
+      xlsxiowriter writer = xlsxiowrite_open(
+        filenameVar.getValue(),
+        (*sheetname ? sheetname : "Sheet1")
+      );
+      if ( !writer )
+        return &writeResult;
+
+      bool ok = writeSheetData(writer, dataVar);
+      int closeResult = xlsxiowrite_close(writer);
+
+      if ( ok && closeResult == 0 )
+        writeResult = BitVar(true);
+
+      return &writeResult;
+    }
+
+    // -------------------------------------------------------------------------
+    // excelWriteFile(string filename, mapping data) -> bool
+    // Writes sheets from a mapping where keys are sheet names and
+    // values are dyn_mapping (rows).
+    // xlsxio only supports one sheet per file, so only the first entry is written.
+    case F_excelWriteFile:
+    {
+      param.thread->clearLastError();
+      writeResult = BitVar(false);
+
+      TextVar filenameVar;
+      filenameVar = *(param.args->getFirst()->evaluate(param.thread));
+
+      MappingVar dataVar;
+      dataVar = *(param.args->getNext()->evaluate(param.thread));
+
+      unsigned int numSheets = dataVar.getNumberOfItems();
+      if ( numSheets == 0 )
+      {
+        writeResult = BitVar(true);
+        return &writeResult;
+      }
+
+      // Use the first entry: key = sheet name, value = dyn_mapping
+      Variable *sheetNameKey = dataVar.getKey(0);
+      Variable *sheetDataVar = dataVar.getValue(0);
+
+      if ( !sheetNameKey || !sheetDataVar || !sheetDataVar->isDynVar() )
+        return &writeResult;
+
+      CharString sheetNameStr = sheetNameKey->formatValue(CharString());
+      const DynVar *sheetData = static_cast<const DynVar *>(sheetDataVar);
+
+      xlsxiowriter writer = xlsxiowrite_open(
+        filenameVar.getValue(),
+        sheetNameStr.c_str()
+      );
+      if ( !writer )
+        return &writeResult;
+
+      bool ok = writeSheetData(writer, *sheetData);
+      int closeResult = xlsxiowrite_close(writer);
+
+      if ( ok && closeResult == 0 )
+        writeResult = BitVar(true);
+
+      return &writeResult;
     }
 
     // -------------------------------------------------------------------------

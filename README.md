@@ -1,6 +1,6 @@
 # WinCC OA CTRL Extension for Excel
 
-A WinCC OA CTRL extension that adds `.xlsx` file reading capabilities using a [fork of xlsxio](https://github.com/jumoog/xlsxio) with cell type detection.
+A WinCC OA CTRL extension that adds `.xlsx` file reading and writing capabilities using a [fork of xlsxio](https://github.com/jumoog/xlsxio) with cell type detection.
 
 ## CTRL Functions
 
@@ -65,22 +65,67 @@ DebugN(rows[2][2]);  // 30       (int)
 ### `excelReadFile`
 
 ```ctrl
-dyn_dyn_mapping excelReadFile(string filename, bool skipHiddenRows = TRUE, bool firstRowIsColumnNames = TRUE)
+mapping excelReadFile(string filename, bool skipHiddenRows = TRUE, bool firstRowIsColumnNames = TRUE)
 ```
 
-Reads all sheets in the file at once. Returns a `dyn_dyn_mapping` where each element is one sheet (a `dyn_mapping` of rows).
+Reads all sheets in the file at once. Returns a `mapping` where keys are sheet names and values are `dyn_mapping` (rows).
 
 - **skipHiddenRows** — optional, defaults to `TRUE`.
 - **firstRowIsColumnNames** — optional, defaults to `TRUE`.
 
-Use `excelGetSheetNames` to map sheet indices to names.
+```ctrl
+mapping allSheets = excelReadFile("C:/data/report.xlsx");
+
+// Access sheets by name
+DebugN(allSheets["Sheet1"][1]["Name"]);   // first row of Sheet1
+DebugN(allSheets["Summary"][1]["Total"]); // first row of Summary sheet
+```
+
+### `excelWriteSheet`
 
 ```ctrl
-dyn_dyn_mapping allSheets = excelReadFile("C:/data/report.xlsx");
+bool excelWriteSheet(string filename, string sheetName, dyn_mapping data)
+```
 
-// allSheets[1] = first sheet rows, allSheets[2] = second sheet rows, ...
-DebugN(allSheets[1][1]["Name"]);  // first row of first sheet
-DebugN(allSheets[2][1]["Name"]);  // first row of second sheet
+Writes a `dyn_mapping` to a single-sheet `.xlsx` file. Mapping keys from the first row become column headers.
+
+```ctrl
+dyn_mapping rows;
+mapping row1, row2;
+row1["Name"] = "Alice";
+row1["Age"]  = 30;
+row2["Name"] = "Bob";
+row2["Age"]  = 25;
+dynAppend(rows, row1);
+dynAppend(rows, row2);
+
+bool ok = excelWriteSheet("C:/data/output.xlsx", "People", rows);
+```
+
+### `excelWriteFile`
+
+```ctrl
+bool excelWriteFile(string filename, mapping data)
+```
+
+Writes a `mapping` where keys are sheet names and values are `dyn_mapping` (rows). This is the same format returned by `excelReadFile`.
+
+> **Note:** xlsxio only supports writing one sheet per file, so only the first entry in the mapping is written.
+
+```ctrl
+// Read and write back (round-trip)
+mapping allSheets = excelReadFile("C:/data/input.xlsx");
+bool ok = excelWriteFile("C:/data/output.xlsx", allSheets);
+
+// Build from scratch
+dyn_mapping rows;
+mapping row;
+row["Name"] = "Alice";
+dynAppend(rows, row);
+
+mapping data;
+data["MySheet"] = rows;
+bool ok = excelWriteFile("C:/data/output.xlsx", data);
 ```
 
 ## Build
