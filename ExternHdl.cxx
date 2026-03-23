@@ -247,7 +247,7 @@ static void writeTypedCell(XLCell &cell, const Variable *val)
 
 // Write a DynVar of MappingVars to an OpenXLSX worksheet.
 // Column headers are taken from the keys of the first mapping row.
-static bool writeSheetData(XLWorksheet &wks, DynVar &data)
+static bool writeSheetData(XLWorksheet &wks, DynVar &data, XLDocument &doc)
 {
   unsigned int numRows = data.getNumberOfItems();
   if ( numRows == 0 )
@@ -277,10 +277,22 @@ static bool writeSheetData(XLWorksheet &wks, DynVar &data)
   for ( unsigned int c = 0; c < numCols; c++ )
     maxWidths[c] = strlen(columnNames[c].c_str());
 
-  // Write column headers in row 1
+  // Create bold cell format for the header row.
+  // XLFont/XLCellFormat are XML-node proxies: call create() first to duplicate
+  // the default entry, then modify the new entry so the default is not mutated.
+  XLStyleIndex boldFontIdx = doc.styles().fonts().create(doc.styles().fonts().fontByIndex(0));
+  doc.styles().fonts().fontByIndex(boldFontIdx).setBold(true);
+  XLStyleIndex boldFmtIdx = doc.styles().cellFormats().create(doc.styles().cellFormats().cellFormatByIndex(0));
+  doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setFontIndex(boldFontIdx);
+  doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setApplyFont(true);
+
+  // Write column headers in row 1 (bold)
   for ( unsigned int c = 0; c < numCols; c++ )
-    wks.cell(1, static_cast<uint16_t>(c + 1)).value() =
-      std::string(columnNames[c].c_str());
+  {
+    auto cell = wks.cell(1, static_cast<uint16_t>(c + 1));
+    cell.value() = std::string(columnNames[c].c_str());
+    cell.setCellFormat(boldFmtIdx);
+  }
 
   // Write data rows starting from row 2
   for ( unsigned int r = 0; r < numRows; r++ )
@@ -514,7 +526,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         wb.worksheet(1).setName(sheetName);
 
         auto wks = wb.worksheet(sheetName);
-        bool ok = writeSheetData(wks, *dataVar);
+        bool ok = writeSheetData(wks, *dataVar, doc);
 
         doc.save();
         doc.close();
@@ -575,7 +587,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
 
           DynVar *sheetData = const_cast<DynVar *>(
             static_cast<const DynVar *>(sheetDataVar));
-          ok = writeSheetData(wks, *sheetData) && ok;
+          ok = writeSheetData(wks, *sheetData, doc) && ok;
         }
 
         doc.save();
