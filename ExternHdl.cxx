@@ -155,7 +155,7 @@ static void writeTypedCell(xlsxiowriter writer, const Variable *val)
         static_cast<const FloatVar *>(val)->getValue());
       return;
     case BIT_VAR:
-      xlsxiowrite_add_cell_int(writer,
+      xlsxiowrite_add_cell_boolean(writer,
         static_cast<const BitVar *>(val)->isTrue() ? 1 : 0);
       return;
     case TIME_VAR:
