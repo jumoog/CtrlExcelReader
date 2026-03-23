@@ -9,6 +9,7 @@ set(TARGET CtrlExcelReader)
 
 set(SOURCES
 ExternHdl.cxx
+ExcelXlsxHelpers.cxx
 )
 
 if ( WIN32 )

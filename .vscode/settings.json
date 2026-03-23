@@ -1,0 +1,5 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configurePreset": "vs2022-vcpkg",
+  "cmake.buildPreset": "relwithdebinfo"
+}
