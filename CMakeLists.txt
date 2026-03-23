@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.15)
 set(API_ROOT "C:/Siemens/Automation/WinCC_OA/3.20/api" CACHE FILEPATH "directory of the WinCC_OA API installation")
 include(${API_ROOT}/CMakeDefines.txt)
 
-project(Ctrl_TEMPLATE)
+project(CtrlExcelReader)
 
-set(TARGET Ctrl_TEMPLATE)
+set(TARGET CtrlExcelReader)
 
 set(SOURCES
 ExternHdl.cxx

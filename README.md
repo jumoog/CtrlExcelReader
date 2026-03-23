@@ -1,6 +1,6 @@
 # WinCC OA CTRL Extension for Excel
 
-A WinCC OA CTRL extension that adds `.xlsx` file reading capabilities using [xlsxio](https://github.com/brechtsanders/xlsxio).
+A WinCC OA CTRL extension that adds `.xlsx` file reading capabilities using a [fork of xlsxio](https://github.com/jumoog/xlsxio) with cell type detection.
 
 ## CTRL Functions
 
@@ -27,11 +27,12 @@ Reads a sheet and returns each data row as a `mapping`. The first row is used as
 
 Pass an empty string for `sheetName` to read the first sheet.
 
-Cell values are automatically typed:
+Cell values are automatically typed based on the Excel cell type:
 
-- Integers → `int`
-- Decimals → `float`
-- Everything else → `string`
+- Numeric integers → `int`
+- Numeric decimals → `float`
+- Booleans → `bool`
+- Strings, dates, and everything else → `string`
 
 ```ctrl
 // Read the first sheet, skip hidden rows (default)
@@ -95,11 +96,11 @@ cmake --build build --config RelWithDebInfo
 
 ### Install
 
-Copy the built `Ctrl_TEMPLATE.dll` from `build/RelWithDebInfo/` into your WinCC OA project's `bin/` directory.
+Copy the built `CtrlExcelReader.dll` from `build/RelWithDebInfo/` into your WinCC OA project's `bin/` directory.
 
 Add the extension to your WinCC OA config file:
 
 ```text
 [ctrl]
-LoadCtrlLibs = "Ctrl_TEMPLATE"
+LoadCtrlLibs = "CtrlExcelReader"
 ```

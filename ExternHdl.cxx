@@ -13,36 +13,51 @@
 
 //------------------------------------------------------------------------------
 
-// Parse a cell string and set the mapping value with the appropriate type.
-// Integers -> IntegerVar, decimals -> FloatVar, everything else -> TextVar.
-static void setTypedCell(MappingVar &row, const char *key, const char *value)
+// Set a mapping value using the cell type reported by xlsxio.
+//   VALUE    -> IntegerVar or FloatVar (parsed from string)
+//   BOOLEAN  -> BitVar
+//   DATE     -> TextVar (kept as string)
+//   STRING / NONE -> TextVar
+static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
 {
+  const char *value = cell->data;
+
   if ( !value || !*value )
   {
     row.setAt(TextVar(key), TextVar(""));
     return;
   }
 
-  char *end = nullptr;
-
-  // Try integer
-  long lval = strtol(value, &end, 10);
-  if ( *end == '\0' && end != value && lval >= INT_MIN && lval <= INT_MAX )
+  switch ( cell->cell_type )
   {
-    row.setAt(TextVar(key), IntegerVar(static_cast<int>(lval)));
-    return;
-  }
+    case XLSXIOREAD_CELL_TYPE_VALUE:
+    {
+      char *end = nullptr;
+      long lval = strtol(value, &end, 10);
+      if ( *end == '\0' && end != value && lval >= INT_MIN && lval <= INT_MAX )
+      {
+        row.setAt(TextVar(key), IntegerVar(static_cast<int>(lval)));
+        return;
+      }
+      double dval = strtod(value, &end);
+      if ( *end == '\0' && end != value )
+      {
+        row.setAt(TextVar(key), FloatVar(dval));
+        return;
+      }
+      row.setAt(TextVar(key), TextVar(value));
+      return;
+    }
+    case XLSXIOREAD_CELL_TYPE_BOOLEAN:
+    {
+      row.setAt(TextVar(key), BitVar(value[0] != '0'));
+      return;
+    }
 
-  // Try float
-  double dval = strtod(value, &end);
-  if ( *end == '\0' && end != value )
-  {
-    row.setAt(TextVar(key), FloatVar(dval));
-    return;
+    default:
+      row.setAt(TextVar(key), TextVar(value));
+      return;
   }
-
-  // Fall back to string
-  row.setAt(TextVar(key), TextVar(value));
 }
 
 // Read an open sheet into a DynVar of MappingVar rows.
@@ -53,11 +68,11 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
   std::vector<std::string> headers;
   if ( xlsxioread_sheet_next_row(sheet) )
   {
-    XLSXIOCHAR *cellValue;
-    while ( (cellValue = xlsxioread_sheet_next_cell(sheet)) != nullptr )
+    xlsxioread_cell cell;
+    while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
     {
-      headers.emplace_back(cellValue);
-      xlsxioread_free(cellValue);
+      headers.emplace_back(cell->data ? cell->data : "");
+      free(cell);
     }
   }
 
@@ -66,14 +81,14 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
   {
     MappingVar rowMap;
     int colIdx = 0;
-    XLSXIOCHAR *cellValue;
-    while ( (cellValue = xlsxioread_sheet_next_cell(sheet)) != nullptr )
+    xlsxioread_cell cell;
+    while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
     {
       const char *key = (colIdx < (int)headers.size())
         ? headers[colIdx].c_str()
         : std::to_string(colIdx + 1).c_str();
-      setTypedCell(rowMap, key, cellValue);
-      xlsxioread_free(cellValue);
+      setTypedCell(rowMap, key, cell);
+      free(cell);
       colIdx++;
     }
     result.append(rowMap);
@@ -83,8 +98,8 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
 static FunctionListRec fnList[] =
 {
   { DYNTEXT_VAR,       "excelGetSheetNames", "(string filename)",                                        false },
-  { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows)", false },
-  { DYNDYNMAPPING_VAR, "excelReadFile",      "(string filename, bool skipHiddenRows)",                   false },
+  { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true)", false },
+  { DYNDYNMAPPING_VAR, "excelReadFile",      "(string filename, bool skipHiddenRows = true)",                   false },
 };
 
 CTRL_EXTENSION(ExternHdl, fnList)
