@@ -1,8 +1,8 @@
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO jumoog/xlsxio
-    REF 62de5a159cfa71291dd5cacf270377d6b6178ecb
-    SHA512 fe3daaa8998c1eecbbe246d3188239f3419a392aced982e54063e94108ae99dece618561b50fba3f8eb46ea28ff2f66594d529d718c8d7ebbeea4a20fd6032e9
+    REF ab3bbd4ab642d0d36014ff177a612add048adb56
+    SHA512 4b402e90ffdcf38b610e23c7aa335958e486b9bd3aa56b7eb6a207e3ee28eefe791d24423dd7c083ae7555ff78c90a0a40e817e65e7b081e359618d4a9ad5bb9
     HEAD_REF master
     PATCHES
         fix-dependencies.patch

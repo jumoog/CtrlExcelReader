@@ -102,6 +102,30 @@ dynAppend(rows, row2);
 bool ok = excelWriteSheet("C:/data/output.xlsx", "People", rows);
 ```
 
+### `excelWriteFile`
+
+```ctrl
+bool excelWriteFile(string filename, mapping data)
+```
+
+Writes a `mapping` where keys are sheet names and values are `dyn_anytype` (rows of mappings) to a multi-sheet `.xlsx` file. This is the same format returned by `excelReadFile`.
+
+```ctrl
+// Read and write back (round-trip)
+mapping allSheets = excelReadFile("C:/data/input.xlsx");
+bool ok = excelWriteFile("C:/data/output.xlsx", allSheets);
+
+// Build from scratch
+dyn_mapping rows;
+mapping row;
+row["Name"] = "Alice";
+dynAppend(rows, row);
+
+mapping data;
+data["Sheet1"] = rows;
+bool ok = excelWriteFile("C:/data/output.xlsx", data);
+```
+
 ## Build
 
 ### Prerequisites
