@@ -6,188 +6,253 @@
 #include <MappingVar.hxx>
 #include <TimeVar.hxx>
 
-#include <xlsxio_read.h>
-#include <xlsxio_write.h>
+#include <OpenXLSX.hpp>
 
-#include <cstdlib>
+#include <cctype>
 #include <climits>
 #include <cmath>
+#include <ctime>
 #include <string>
 #include <vector>
 
+using namespace OpenXLSX;
+
+//------------------------------------------------------------------------------
+// Date-format detection helpers
+//   OpenXLSX reports dates as XLValueType::Float.  We inspect the cell's
+//   number-format to tell dates from plain numbers.
 //------------------------------------------------------------------------------
 
-// Set a mapping value using the cell type reported by xlsxio.
-//   VALUE    -> IntegerVar or FloatVar (parsed from string)
-//   BOOLEAN  -> BitVar
-//   DATE     -> TimeVar (Excel serial converted to time_t)
-//   STRING / NONE -> TextVar
-static void setTypedCell(MappingVar &row, const Variable &key, xlsxioread_cell cell)
+// Built-in Excel number-format IDs that represent dates/times (ECMA-376).
+static bool isBuiltinDateFormatId(unsigned int id)
 {
-  const char *value = cell->data;
+  return (id >= 14 && id <= 22)
+      || (id >= 27 && id <= 36)
+      || (id >= 45 && id <= 47);
+}
 
-  if ( !value || !*value )
+// Scan a custom format-code string for date/time tokens (y m d h s)
+// while ignoring quoted literals, escaped chars and bracketed sections.
+static bool isDateFormatCode(const std::string &code)
+{
+  bool inQuote   = false;
+  bool inBracket = false;
+
+  for (size_t i = 0; i < code.size(); i++)
   {
-    row.setAt(key, TextVar(""));
-    return;
+    char c = code[i];
+
+    if ( c == '"' )          { inQuote = !inQuote; continue; }
+    if ( inQuote )           continue;
+    if ( c == '\\' )         { i++; continue; }         // skip escaped char
+    if ( c == '[' )          { inBracket = true;  continue; }
+    if ( c == ']' )          { inBracket = false; continue; }
+    if ( inBracket )         continue;
+
+    char lower = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if ( lower == 'y' || lower == 'm' || lower == 'd'
+      || lower == 'h' || lower == 's' )
+      return true;
   }
+  return false;
+}
 
-  switch ( cell->cell_type )
+// Check whether a cell's number format indicates a date.
+static bool isCellDate(XLDocument &doc, const XLCell &cell)
+{
+  try
   {
-    case XLSXIOREAD_CELL_TYPE_VALUE:
-    {
-      char *end = nullptr;
-      long lval = strtol(value, &end, 10);
-      if ( *end == '\0' && end != value && lval >= INT_MIN && lval <= INT_MAX )
-      {
-        row.setAt(key, IntegerVar(static_cast<int>(lval)));
-        return;
-      }
-      double dval = strtod(value, &end);
-      if ( *end == '\0' && end != value )
-      {
-        row.setAt(key, FloatVar(dval));
-        return;
-      }
-      row.setAt(key, TextVar(value));
-      return;
-    }
-    case XLSXIOREAD_CELL_TYPE_BOOLEAN:
-    {
-      row.setAt(key, BitVar(value[0] != '0'));
-      return;
-    }
-    case XLSXIOREAD_CELL_TYPE_DATE:
-    {
-      // Excel stores dates as a serial number (days since Dec 30, 1899).
-      // 25569 is the serial for Jan 1, 1970 (Unix epoch) in Excel's system,
-      // which includes the historical Feb 29, 1900 leap-year bug.
-      // Excel dates carry no timezone — treat them as local time.
-      char *end = nullptr;
-      double serial = strtod(value, &end);
-      if ( *end == '\0' && end != value )
-      {
-        double totalSeconds = (serial - 25569.0) * 86400.0;
-        time_t naive = static_cast<time_t>(floor(totalSeconds));
-        double frac = totalSeconds - floor(totalSeconds);
+    auto styles        = doc.styles();
+    auto styleIdx      = cell.cellFormat();
+    auto fmt           = styles.cellFormats().cellFormatByIndex(styleIdx);
+    unsigned int fmtId = fmt.numberFormatId();
 
-        // Decompose as UTC, then reinterpret as local time via mktime
-        struct tm components = *gmtime(&naive);
-        components.tm_isdst = -1;
-        time_t sec = mktime(&components);
+    if ( isBuiltinDateFormatId(fmtId) )
+      return true;
 
-        PVSSshort milli = static_cast<PVSSshort>(frac * 1000.0);
+    if ( fmtId >= 164 )
+    {
+      std::string code = styles.numberFormats()
+                                .numberFormatById(fmtId)
+                                .formatCode();
+      return isDateFormatCode(code);
+    }
+  }
+  catch (...) {}
+
+  return false;
+}
+
+//------------------------------------------------------------------------------
+// Read helpers
+//------------------------------------------------------------------------------
+
+// Set a mapping value using the cell type reported by OpenXLSX.
+static void setTypedCell(MappingVar &row, const Variable &key,
+                         XLCell &cell, XLDocument &doc)
+{
+  XLCellValue val = cell.value();
+  auto type = val.type();
+
+  switch ( type )
+  {
+    case XLValueType::Empty:
+      row.setAt(key, TextVar(""));
+      return;
+
+    case XLValueType::Boolean:
+      row.setAt(key, BitVar(val.get<bool>()));
+      return;
+
+    case XLValueType::Integer:
+      row.setAt(key, IntegerVar(static_cast<int>(val.get<int64_t>())));
+      return;
+
+    case XLValueType::Float:
+    {
+      if ( isCellDate(doc, cell) )
+      {
+        XLDateTime dt = val.get<XLDateTime>();
+        std::tm    tm = dt.tm();
+        tm.tm_isdst   = -1;
+        time_t sec    = mktime(&tm);
+
+        double serial = dt.serial();
+        double frac   = serial - floor(serial);
+        PVSSshort milli = static_cast<PVSSshort>(frac * 86400.0 * 1000.0
+                          - floor(frac * 86400.0) * 1000.0);
         row.setAt(key, TimeVar(sec, milli));
-        return;
       }
-      row.setAt(key, TextVar(value));
+      else
+      {
+        double dval = val.get<double>();
+        double intpart;
+        if ( modf(dval, &intpart) == 0.0
+          && intpart >= INT_MIN && intpart <= INT_MAX )
+        {
+          row.setAt(key, IntegerVar(static_cast<int>(intpart)));
+        }
+        else
+        {
+          row.setAt(key, FloatVar(dval));
+        }
+      }
       return;
     }
+
+    case XLValueType::String:
+      row.setAt(key, TextVar(val.get<std::string>().c_str()));
+      return;
+
     default:
-      row.setAt(key, TextVar(value));
+      row.setAt(key, TextVar(""));
       return;
   }
 }
 
-// Read an open sheet into a DynVar of MappingVar rows.
-// When useHeaders is true, the first row supplies the mapping keys;
-// otherwise every row uses 1-based column numbers as keys.
-static void readSheetRows(xlsxioreadersheet sheet, DynVar &result, bool useHeaders)
+// Read an open worksheet into a DynVar of MappingVar rows.
+static void readSheetRows(XLWorksheet &wks, XLDocument &doc,
+                          DynVar &result, bool useHeaders, bool skipHidden)
 {
+  uint32_t rowCount = wks.rowCount();
+  uint16_t colCount = wks.columnCount();
+
+  if ( rowCount == 0 || colCount == 0 )
+    return;
+
   std::vector<std::string> headers;
+  uint32_t dataStartRow = 1;
 
   if ( useHeaders )
   {
-    // Read the first row as column headers
-    if ( xlsxioread_sheet_next_row(sheet) )
+    for ( uint16_t c = 1; c <= colCount; c++ )
     {
-      xlsxioread_cell cell;
-      while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
-      {
-        headers.emplace_back(cell->data ? cell->data : "");
-        free(cell);
-      }
+      auto cell = wks.cell(1, c);
+      XLCellValue val = cell.value();
+      if ( val.type() == XLValueType::Empty )
+        headers.emplace_back("");
+      else
+        headers.push_back(val.get<std::string>());
     }
+    dataStartRow = 2;
   }
 
-  // Read data rows
-  while ( xlsxioread_sheet_next_row(sheet) )
+  for ( uint32_t r = dataStartRow; r <= rowCount; r++ )
   {
+    auto xlRow = wks.row(r);
+    if ( skipHidden && xlRow.isHidden() )
+      continue;
+
     MappingVar rowMap;
-    int colIdx = 0;
-    xlsxioread_cell cell;
-    while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
+    for ( uint16_t c = 1; c <= colCount; c++ )
     {
-      if ( useHeaders && colIdx < (int)headers.size() )
-        setTypedCell(rowMap, TextVar(headers[colIdx].c_str()), cell);
+      auto cell = wks.cell(r, c);
+      if ( useHeaders && (c - 1) < static_cast<uint16_t>(headers.size()) )
+        setTypedCell(rowMap, TextVar(headers[c - 1].c_str()), cell, doc);
       else
-        setTypedCell(rowMap, IntegerVar(colIdx + 1), cell);
-      free(cell);
-      colIdx++;
+        setTypedCell(rowMap, IntegerVar(c), cell, doc);
     }
     result.append(rowMap);
   }
 }
 
 //------------------------------------------------------------------------------
+// Write helpers
+//------------------------------------------------------------------------------
 
-// Write a single cell value, choosing the xlsxio call by WinCC OA Variable type.
-static void writeTypedCell(xlsxiowriter writer, const Variable *val)
+// Write a single WinCC OA Variable to an OpenXLSX cell.
+static void writeTypedCell(XLCell &cell, const Variable *val)
 {
   if ( !val )
   {
-    xlsxiowrite_add_cell_string(writer, "");
+    cell.value() = std::string();
     return;
   }
 
   switch ( val->isA() )
   {
     case INTEGER_VAR:
-      xlsxiowrite_add_cell_int(writer, static_cast<int64_t>(
-        static_cast<const IntegerVar *>(val)->getValue()));
+      cell.value() = static_cast<int64_t>(
+        static_cast<const IntegerVar *>(val)->getValue());
       return;
     case LONG_VAR:
-      xlsxiowrite_add_cell_int(writer, static_cast<int64_t>(
-        static_cast<const LongVar *>(val)->getValue()));
+      cell.value() = static_cast<int64_t>(
+        static_cast<const LongVar *>(val)->getValue());
       return;
     case FLOAT_VAR:
-      xlsxiowrite_add_cell_float(writer,
-        static_cast<const FloatVar *>(val)->getValue());
+      cell.value() = static_cast<const FloatVar *>(val)->getValue();
       return;
     case BIT_VAR:
-      xlsxiowrite_add_cell_boolean(writer,
-        static_cast<const BitVar *>(val)->isTrue() ? 1 : 0);
+      cell.value() = static_cast<const BitVar *>(val)->isTrue();
       return;
     case TIME_VAR:
-      xlsxiowrite_add_cell_datetime(writer, static_cast<time_t>(
-        static_cast<const TimeVar *>(val)->getSeconds()));
+    {
+      time_t sec = static_cast<time_t>(
+        static_cast<const TimeVar *>(val)->getSeconds());
+      cell.value() = XLDateTime(sec);
       return;
+    }
     case TEXT_VAR:
-      xlsxiowrite_add_cell_string(writer,
+      cell.value() = std::string(
         static_cast<const TextVar *>(val)->getValue());
       return;
     default:
     {
       CharString str = val->formatValue(CharString());
-      xlsxiowrite_add_cell_string(writer, str.c_str());
+      cell.value() = std::string(str.c_str());
       return;
     }
   }
 }
 
-// Write a dyn_mapping (array of row-mappings) to an already-opened xlsxio writer.
+// Write a DynVar of MappingVars to an OpenXLSX worksheet.
 // Column headers are taken from the keys of the first mapping row.
-static bool writeSheetData(xlsxiowriter writer, DynVar &data)
+static bool writeSheetData(XLWorksheet &wks, DynVar &data)
 {
   unsigned int numRows = data.getNumberOfItems();
   if ( numRows == 0 )
     return true;
 
-  xlsxiowrite_set_detection_rows(writer, numRows);
-  xlsxiowrite_set_row_height(writer, 1);
-
-  // Copy first row into a local MappingVar (dyn_anytype elements may be
-  // wrapped in AnyTypeVar; operator= handles the unwrapping).
   Variable *firstRowVar = data.getAt(0);
   if ( !firstRowVar )
     return false;
@@ -207,34 +272,37 @@ static bool writeSheetData(xlsxiowriter writer, DynVar &data)
     columnNames.push_back(key->formatValue(CharString()));
   }
 
-  // Write column headers
-  for ( const CharString &name : columnNames )
-    xlsxiowrite_add_column(writer, name.c_str(), 0);
-  xlsxiowrite_next_row(writer);
+  // Write column headers in row 1
+  for ( unsigned int c = 0; c < numCols; c++ )
+    wks.cell(1, static_cast<uint16_t>(c + 1)).value() =
+      std::string(columnNames[c].c_str());
 
-  // Write data rows
+  // Write data rows starting from row 2
   for ( unsigned int r = 0; r < numRows; r++ )
   {
     Variable *rowVar = data.getAt(r);
     if ( !rowVar )
-    {
-      xlsxiowrite_next_row(writer);
       continue;
-    }
 
     MappingVar row;
-    row = *rowVar;
-    for ( const CharString &name : columnNames )
+    row = *rowVar;  // AnyTypeVar unwrapping via operator=
+
+    for ( unsigned int c = 0; c < numCols; c++ )
     {
-      TextVar keyVar(name.c_str());
+      TextVar keyVar(columnNames[c].c_str());
       Variable *cellVal = row.getAt(keyVar);
-      writeTypedCell(writer, cellVal);
+      auto cell = wks.cell(
+        static_cast<uint32_t>(r + 2),
+        static_cast<uint16_t>(c + 1)
+      );
+      writeTypedCell(cell, cellVal);
     }
-    xlsxiowrite_next_row(writer);
   }
 
   return true;
 }
+
+//------------------------------------------------------------------------------
 
 static FunctionListRec fnList[] =
 {
@@ -269,7 +337,6 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
   {
     // -------------------------------------------------------------------------
     // excelGetSheetNames(string filename) -> dyn_string
-    // Returns the names of all sheets in the given .xlsx file.
     case F_excelGetSheetNames:
     {
       param.thread->clearLastError();
@@ -281,27 +348,24 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       TextVar filenameVar;
       filenameVar = *(param.args->getFirst()->evaluate(param.thread));
 
-      xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
-      if ( !reader )
-        return &dynTextResult;
-
-      xlsxioreadersheetlist sheetlist = xlsxioread_sheetlist_open(reader);
-      const XLSXIOCHAR *sheetname;
-      while ( (sheetname = xlsxioread_sheetlist_next(sheetlist)) != nullptr )
-        dynTextResult.append(TextVar(sheetname));
-      xlsxioread_sheetlist_close(sheetlist);
-      xlsxioread_close(reader);
+      try
+      {
+        XLDocument doc;
+        doc.open(filenameVar.getValue());
+        auto names = doc.workbook().sheetNames();
+        for ( const auto &name : names )
+          dynTextResult.append(TextVar(name.c_str()));
+        doc.close();
+      }
+      catch (...) {}
 
       return &dynTextResult;
     }
 
     // -------------------------------------------------------------------------
-    // excelReadSheet(string filename, string sheetName, bool skipHiddenRows)
+    // excelReadSheet(string filename, string sheetName,
+    //                bool skipHiddenRows, bool firstRowIsColumnNames)
     //   -> dyn_mapping
-    // Reads a sheet as a dyn_mapping. The first row is used as header;
-    // each subsequent row becomes a mapping keyed by the header values.
-    // Pass an empty sheetName to read the first sheet.
-    // skipHiddenRows: when TRUE, hidden rows are omitted from the result.
     case F_excelReadSheet:
     {
       param.thread->clearLastError();
@@ -329,41 +393,27 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         useHeaders = headerVar.isTrue();
       }
 
-      xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
-      if ( !reader )
-        return &dynMappingResult;
-
-      unsigned flags = XLSXIOREAD_SKIP_EMPTY_ROWS;
-      if ( skipHidden )
-        flags |= XLSXIOREAD_SKIP_HIDDEN_ROWS;
-
-      // Pass nullptr to open the first sheet when sheetName is empty
-      const char *sheetname = sheetnameVar.getValue();
-      xlsxioreadersheet sheet = xlsxioread_sheet_open(
-        reader,
-        (*sheetname ? sheetname : nullptr),
-        flags
-      );
-
-      if ( !sheet )
+      try
       {
-        xlsxioread_close(reader);
-        return &dynMappingResult;
+        XLDocument doc;
+        doc.open(filenameVar.getValue());
+
+        const char *sheetname = sheetnameVar.getValue();
+        auto wks = (*sheetname)
+          ? doc.workbook().worksheet(std::string(sheetname))
+          : doc.workbook().worksheet(1);
+
+        readSheetRows(wks, doc, dynMappingResult, useHeaders, skipHidden);
+        doc.close();
       }
-
-      readSheetRows(sheet, dynMappingResult, useHeaders);
-
-      xlsxioread_sheet_close(sheet);
-      xlsxioread_close(reader);
+      catch (...) {}
 
       return &dynMappingResult;
     }
 
     // -------------------------------------------------------------------------
-    // excelReadFile(string filename, bool skipHiddenRows, bool firstRowIsColumnNames)
-    //   -> mapping
-    // Reads all sheets. Returns a mapping where keys are sheet names
-    // and values are dyn_mapping (rows).
+    // excelReadFile(string filename, bool skipHiddenRows,
+    //              bool firstRowIsColumnNames) -> mapping
     case F_excelReadFile:
     {
       param.thread->clearLastError();
@@ -390,45 +440,33 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         useHeaders = headerVar.isTrue();
       }
 
-      xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
-      if ( !reader )
-        return &mappingResult;
-
-      // Collect sheet names
-      std::vector<std::string> sheetNames;
-      xlsxioreadersheetlist sheetlist = xlsxioread_sheetlist_open(reader);
-      const XLSXIOCHAR *name;
-      while ( (name = xlsxioread_sheetlist_next(sheetlist)) != nullptr )
-        sheetNames.emplace_back(name);
-      xlsxioread_sheetlist_close(sheetlist);
-
-      unsigned flags = XLSXIOREAD_SKIP_EMPTY_ROWS;
-      if ( skipHidden )
-        flags |= XLSXIOREAD_SKIP_HIDDEN_ROWS;
-
-      for ( const auto &sn : sheetNames )
+      try
       {
-        xlsxioreadersheet sheet = xlsxioread_sheet_open(reader, sn.c_str(), flags);
-        if ( !sheet )
-          continue;
+        XLDocument doc;
+        doc.open(filenameVar.getValue());
 
-        DynVar sheetDyn;
-        sheetDyn.reset(MAPPING_VAR);
-        readSheetRows(sheet, sheetDyn, useHeaders);
-        xlsxioread_sheet_close(sheet);
+        auto sheetNames = doc.workbook().worksheetNames();
+        for ( const auto &sn : sheetNames )
+        {
+          auto wks = doc.workbook().worksheet(sn);
 
-        mappingResult.setAt(TextVar(sn.c_str()), sheetDyn);
+          DynVar sheetDyn;
+          sheetDyn.reset(MAPPING_VAR);
+          readSheetRows(wks, doc, sheetDyn, useHeaders, skipHidden);
+
+          mappingResult.setAt(TextVar(sn.c_str()), sheetDyn);
+        }
+
+        doc.close();
       }
+      catch (...) {}
 
-      xlsxioread_close(reader);
       return &mappingResult;
     }
 
     // -------------------------------------------------------------------------
-    // excelWriteSheet(string filename, string sheetName, dyn_mapping data)
+    // excelWriteSheet(string filename, string sheetName, dyn_anytype data)
     //   -> bool
-    // Writes a dyn_mapping to a single-sheet .xlsx file.
-    // Mapping keys from the first row become column headers.
     case F_excelWriteSheet:
     {
       param.thread->clearLastError();
@@ -442,30 +480,37 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       if ( !dataPtr || !dataPtr->isDynVar() )
         return &writeResult;
 
-      // Use the source DynVar directly (no copy — DynVar::append fails for dyn_anytype)
       DynVar *dataVar = const_cast<DynVar *>(static_cast<const DynVar *>(dataPtr));
 
-      const char *sheetname = sheetnameVar.getValue();
-      xlsxiowriter writer = xlsxiowrite_open(
-        filenameVar.getValue(),
-        (*sheetname ? sheetname : "Sheet1")
-      );
-      if ( !writer )
-        return &writeResult;
+      try
+      {
+        XLDocument doc;
+        doc.create(filenameVar.getValue(), XLForceOverwrite);
+        doc.setProperty(XLProperty::Creator, "WinCC OA");
+        doc.setProperty(XLProperty::LastModifiedBy, "WinCC OA");
 
-      bool ok = writeSheetData(writer, *dataVar);
-      int closeResult = xlsxiowrite_close(writer);
+        const char *sheetname = sheetnameVar.getValue();
+        std::string sheetName = (*sheetname) ? sheetname : "Sheet1";
 
-      if ( ok && closeResult == 0 )
-        writeResult = BitVar(true);
+        auto &wb = doc.workbook();
+        wb.worksheet(1).setName(sheetName);
+
+        auto wks = wb.worksheet(sheetName);
+        bool ok = writeSheetData(wks, *dataVar);
+
+        doc.save();
+        doc.close();
+
+        if ( ok )
+          writeResult = BitVar(true);
+      }
+      catch (...) {}
 
       return &writeResult;
     }
 
     // -------------------------------------------------------------------------
     // excelWriteFile(string filename, mapping data) -> bool
-    // Writes multiple sheets from a mapping where keys are sheet names
-    // and values are dyn_anytype (rows of mappings).
     case F_excelWriteFile:
     {
       param.thread->clearLastError();
@@ -474,7 +519,6 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       TextVar filenameVar;
       filenameVar = *(param.args->getFirst()->evaluate(param.thread));
 
-      // Copy the mapping arg into a local MappingVar (AnyTypeVar unwrapping)
       MappingVar dataVar;
       dataVar = *(param.args->getNext()->evaluate(param.thread));
 
@@ -485,39 +529,44 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         return &writeResult;
       }
 
-      // Open writer with the first sheet name
-      CharString firstSheetName = dataVar.getKey(0)->formatValue(CharString());
-      xlsxiowriter writer = xlsxiowrite_open(
-        filenameVar.getValue(),
-        firstSheetName.c_str()
-      );
-      if ( !writer )
-        return &writeResult;
-
-      bool ok = true;
-      for ( unsigned int s = 0; s < numSheets; s++ )
+      try
       {
-        // Switch to next sheet (skip for first sheet — already set in open)
-        if ( s > 0 )
+        XLDocument doc;
+        doc.create(filenameVar.getValue(), XLForceOverwrite);
+        doc.setProperty(XLProperty::Creator, "WinCC OA");
+        doc.setProperty(XLProperty::LastModifiedBy, "WinCC OA");
+
+        auto &wb = doc.workbook();
+        bool ok = true;
+
+        for ( unsigned int s = 0; s < numSheets; s++ )
         {
           CharString sheetName = dataVar.getKey(s)->formatValue(CharString());
-          xlsxiowrite_next_sheet(writer, sheetName.c_str());
+          std::string sheetNameStr(sheetName.c_str());
+
+          if ( s == 0 )
+            wb.worksheet(1).setName(sheetNameStr);
+          else
+            wb.addWorksheet(sheetNameStr);
+
+          auto wks = wb.worksheet(sheetNameStr);
+
+          Variable *sheetDataVar = dataVar.getValue(s);
+          if ( !sheetDataVar || !sheetDataVar->isDynVar() )
+            continue;
+
+          DynVar *sheetData = const_cast<DynVar *>(
+            static_cast<const DynVar *>(sheetDataVar));
+          ok = writeSheetData(wks, *sheetData) && ok;
         }
 
-        // Get the sheet data DynVar directly (no copy for DynVar)
-        Variable *sheetDataVar = dataVar.getValue(s);
-        if ( !sheetDataVar || !sheetDataVar->isDynVar() )
-          continue;
+        doc.save();
+        doc.close();
 
-        DynVar *sheetData = const_cast<DynVar *>(
-          static_cast<const DynVar *>(sheetDataVar));
-        ok = writeSheetData(writer, *sheetData) && ok;
+        if ( ok )
+          writeResult = BitVar(true);
       }
-
-      int closeResult = xlsxiowrite_close(writer);
-
-      if ( ok && closeResult == 0 )
-        writeResult = BitVar(true);
+      catch (...) {}
 
       return &writeResult;
     }

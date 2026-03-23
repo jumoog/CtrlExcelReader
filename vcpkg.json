@@ -2,6 +2,6 @@
   "name": "ctrl-excel-reader",
   "version": "1.0.0",
   "dependencies": [
-    "xlsxio"
+    "openxlsx"
   ]
 }

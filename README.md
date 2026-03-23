@@ -1,6 +1,6 @@
 # WinCC OA CTRL Extension for Excel
 
-A WinCC OA CTRL extension that adds `.xlsx` file reading and writing capabilities using a [fork of xlsxio](https://github.com/jumoog/xlsxio) with cell type detection.
+A WinCC OA CTRL extension that adds `.xlsx` file reading and writing capabilities using [OpenXLSX](https://github.com/troldal/OpenXLSX).
 
 ## CTRL Functions
 

@@ -17,7 +17,6 @@ endif()
 
 add_ctrlext(${TARGET} ${SOURCES})
 
-# --- xlsxio (Excel reader / writer) ------------------------------------------
-find_package(xlsxio CONFIG REQUIRED)
-target_link_libraries(${TARGET} xlsxio::xlsxio_read_STATIC xlsxio::xlsxio_write_STATIC)
-target_compile_definitions(${TARGET} PRIVATE BUILD_XLSXIO_STATIC)
+# --- OpenXLSX (Excel reader / writer) ----------------------------------------
+find_package(OpenXLSX CONFIG REQUIRED)
+target_link_libraries(${TARGET} OpenXLSX::OpenXLSX)
