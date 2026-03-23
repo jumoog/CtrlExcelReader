@@ -88,22 +88,27 @@ static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
 }
 
 // Read an open sheet into a DynVar of MappingVar rows.
-// First row is treated as column headers used as mapping keys.
-static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
+// When useHeaders is true, the first row supplies the mapping keys;
+// otherwise every row uses 1-based column numbers as keys.
+static void readSheetRows(xlsxioreadersheet sheet, DynVar &result, bool useHeaders)
 {
-  // Read the first row as column headers
   std::vector<std::string> headers;
-  if ( xlsxioread_sheet_next_row(sheet) )
+
+  if ( useHeaders )
   {
-    xlsxioread_cell cell;
-    while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
+    // Read the first row as column headers
+    if ( xlsxioread_sheet_next_row(sheet) )
     {
-      headers.emplace_back(cell->data ? cell->data : "");
-      free(cell);
+      xlsxioread_cell cell;
+      while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
+      {
+        headers.emplace_back(cell->data ? cell->data : "");
+        free(cell);
+      }
     }
   }
 
-  // Read data rows, keyed by the header names
+  // Read data rows
   while ( xlsxioread_sheet_next_row(sheet) )
   {
     MappingVar rowMap;
@@ -111,7 +116,7 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
     xlsxioread_cell cell;
     while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
     {
-      const char *key = (colIdx < (int)headers.size())
+      const char *key = (useHeaders && colIdx < (int)headers.size())
         ? headers[colIdx].c_str()
         : std::to_string(colIdx + 1).c_str();
       setTypedCell(rowMap, key, cell);
@@ -124,9 +129,9 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result)
 
 static FunctionListRec fnList[] =
 {
-  { DYNTEXT_VAR,       "excelGetSheetNames", "(string filename)",                                        false },
-  { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true)", false },
-  { DYNDYNMAPPING_VAR, "excelReadFile",      "(string filename, bool skipHiddenRows = true)",                   false },
+  { DYNTEXT_VAR,       "excelGetSheetNames", "(string filename)",                                                                          false },
+  { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)", false },
+  { DYNDYNMAPPING_VAR, "excelReadFile",      "(string filename, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)",                   false },
 };
 
 CTRL_EXTENSION(ExternHdl, fnList)
@@ -201,6 +206,15 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         skipHidden = skipHiddenVar.isTrue();
       }
 
+      bool useHeaders = true;
+      CtrlExpr *headerArg = param.args->getNext();
+      if ( headerArg )
+      {
+        BitVar headerVar;
+        headerVar = *(headerArg->evaluate(param.thread));
+        useHeaders = headerVar.isTrue();
+      }
+
       xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
       if ( !reader )
         return &dynMappingResult;
@@ -223,7 +237,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         return &dynMappingResult;
       }
 
-      readSheetRows(sheet, dynMappingResult);
+      readSheetRows(sheet, dynMappingResult, useHeaders);
 
       xlsxioread_sheet_close(sheet);
       xlsxioread_close(reader);
@@ -252,6 +266,15 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         skipHidden = skipHiddenVar.isTrue();
       }
 
+      bool useHeaders = true;
+      CtrlExpr *headerArg = param.args->getNext();
+      if ( headerArg )
+      {
+        BitVar headerVar;
+        headerVar = *(headerArg->evaluate(param.thread));
+        useHeaders = headerVar.isTrue();
+      }
+
       xlsxioreader reader = xlsxioread_open(filenameVar.getValue());
       if ( !reader )
         return &dynDynMappingResult;
@@ -276,7 +299,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
 
         DynVar sheetDyn;
         sheetDyn.reset(MAPPING_VAR);
-        readSheetRows(sheet, sheetDyn);
+        readSheetRows(sheet, sheetDyn, useHeaders);
         xlsxioread_sheet_close(sheet);
 
         dynDynMappingResult.append(sheetDyn);
