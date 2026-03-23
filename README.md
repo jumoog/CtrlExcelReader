@@ -84,10 +84,10 @@ DebugN(allSheets["Summary"][1]["Total"]); // first row of Summary sheet
 ### `excelWriteSheet`
 
 ```ctrl
-bool excelWriteSheet(string filename, string sheetName, dyn_mapping data)
+bool excelWriteSheet(string filename, string sheetName, dyn_anytype data)
 ```
 
-Writes a `dyn_mapping` to a single-sheet `.xlsx` file. Mapping keys from the first row become column headers.
+Writes a `dyn_anytype` (containing mappings) to a single-sheet `.xlsx` file. Mapping keys from the first row become column headers.
 
 ```ctrl
 dyn_mapping rows;

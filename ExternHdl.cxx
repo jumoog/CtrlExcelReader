@@ -177,7 +177,7 @@ static void writeTypedCell(xlsxiowriter writer, const Variable *val)
 
 // Write a dyn_mapping (array of row-mappings) to an already-opened xlsxio writer.
 // Column headers are taken from the keys of the first mapping row.
-static bool writeSheetData(xlsxiowriter writer, const DynVar &data)
+static bool writeSheetData(xlsxiowriter writer, DynVar &data)
 {
   unsigned int numRows = data.getNumberOfItems();
   if ( numRows == 0 )
@@ -186,43 +186,48 @@ static bool writeSheetData(xlsxiowriter writer, const DynVar &data)
   xlsxiowrite_set_detection_rows(writer, numRows);
   xlsxiowrite_set_row_height(writer, 1);
 
+  // Copy first row into a local MappingVar (dyn_anytype elements may be
+  // wrapped in AnyTypeVar; operator= handles the unwrapping).
   Variable *firstRowVar = data.getAt(0);
-  if ( !firstRowVar || firstRowVar->isA() != MAPPING_VAR )
+  if ( !firstRowVar )
     return false;
 
-  const MappingVar *firstRow = static_cast<const MappingVar *>(firstRowVar);
-  unsigned int numCols = firstRow->getNumberOfItems();
+  MappingVar firstRow;
+  firstRow = *firstRowVar;
+  unsigned int numCols = firstRow.getNumberOfItems();
   if ( numCols == 0 )
     return true;
 
-  // Collect column keys from the first row
-  std::vector<Variable *> columnKeys;
-  columnKeys.reserve(numCols);
+  // Collect column key names from the first row
+  std::vector<CharString> columnNames;
+  columnNames.reserve(numCols);
   for ( unsigned int c = 0; c < numCols; c++ )
-    columnKeys.push_back(firstRow->getKey(c));
+  {
+    Variable *key = firstRow.getKey(c);
+    columnNames.push_back(key->formatValue(CharString()));
+  }
 
   // Write column headers
-  for ( Variable *key : columnKeys )
-  {
-    CharString keyStr = key->formatValue(CharString());
-    xlsxiowrite_add_column(writer, keyStr.c_str(), 0);
-  }
+  for ( const CharString &name : columnNames )
+    xlsxiowrite_add_column(writer, name.c_str(), 0);
   xlsxiowrite_next_row(writer);
 
   // Write data rows
   for ( unsigned int r = 0; r < numRows; r++ )
   {
     Variable *rowVar = data.getAt(r);
-    if ( !rowVar || rowVar->isA() != MAPPING_VAR )
+    if ( !rowVar )
     {
       xlsxiowrite_next_row(writer);
       continue;
     }
 
-    const MappingVar *row = static_cast<const MappingVar *>(rowVar);
-    for ( Variable *key : columnKeys )
+    MappingVar row;
+    row = *rowVar;
+    for ( const CharString &name : columnNames )
     {
-      Variable *cellVal = row->getAt(*key);
+      TextVar keyVar(name.c_str());
+      Variable *cellVal = row.getAt(keyVar);
       writeTypedCell(writer, cellVal);
     }
     xlsxiowrite_next_row(writer);
@@ -236,7 +241,7 @@ static FunctionListRec fnList[] =
   { DYNTEXT_VAR,       "excelGetSheetNames", "(string filename)",                                                                          false },
   { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)", false },
   { MAPPING_VAR,       "excelReadFile",      "(string filename, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)",                   false },
-  { BIT_VAR,           "excelWriteSheet",    "(string filename, string sheetName, dyn_mapping data)",                                              false },
+  { BIT_VAR,           "excelWriteSheet",    "(string filename, string sheetName, dyn_anytype data)",                                              false },
 };
 
 CTRL_EXTENSION(ExternHdl, fnList)
@@ -431,8 +436,12 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       filenameVar  = *(param.args->getFirst()->evaluate(param.thread));
       sheetnameVar = *(param.args->getNext() ->evaluate(param.thread));
 
-      DynVar dataVar;
-      dataVar = *(param.args->getNext()->evaluate(param.thread));
+      const Variable *dataPtr = param.args->getNext()->evaluate(param.thread);
+      if ( !dataPtr || !dataPtr->isDynVar() )
+        return &writeResult;
+
+      // Use the source DynVar directly (no copy — DynVar::append fails for dyn_anytype)
+      DynVar *dataVar = const_cast<DynVar *>(static_cast<const DynVar *>(dataPtr));
 
       const char *sheetname = sheetnameVar.getValue();
       xlsxiowriter writer = xlsxiowrite_open(
@@ -442,7 +451,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       if ( !writer )
         return &writeResult;
 
-      bool ok = writeSheetData(writer, dataVar);
+      bool ok = writeSheetData(writer, *dataVar);
       int closeResult = xlsxiowrite_close(writer);
 
       if ( ok && closeResult == 0 )
