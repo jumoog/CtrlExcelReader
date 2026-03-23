@@ -20,23 +20,25 @@ dyn_string sheets = excelGetSheetNames("C:/data/report.xlsx");
 ### `excelReadSheet`
 
 ```ctrl
-dyn_mapping excelReadSheet(string filename, string sheetName, bool skipHiddenRows)
+dyn_mapping excelReadSheet(string filename, string sheetName, bool skipHiddenRows = TRUE, bool firstRowIsColumnNames = TRUE)
 ```
 
-Reads a sheet and returns each data row as a `mapping`. The first row is used as column headers (mapping keys). The `skipHiddenRows` parameter is optional and defaults to `TRUE`.
+Reads a sheet and returns each data row as a `mapping`.
 
-Pass an empty string for `sheetName` to read the first sheet.
+- **sheetName** — pass an empty string to read the first sheet.
+- **skipHiddenRows** — optional, defaults to `TRUE`. When `TRUE`, hidden rows are omitted.
+- **firstRowIsColumnNames** — optional, defaults to `TRUE`. When `TRUE`, the first row supplies the mapping keys as strings. When `FALSE`, keys are 1-based column integers.
 
 Cell values are automatically typed based on the Excel cell type:
 
 - Numeric integers → `int`
 - Numeric decimals → `float`
 - Booleans → `bool`
-- Dates/times → `time` (Excel serial converted to WinCC OA time)
+- Dates/times → `time` (Excel serial converted to WinCC OA time, treated as local time)
 - Strings and everything else → `string`
 
 ```ctrl
-// Read the first sheet, skip hidden rows (default)
+// Read the first sheet with default options
 dyn_mapping rows = excelReadSheet("C:/data/report.xlsx", "");
 
 // Read a specific sheet, include hidden rows
@@ -47,18 +49,29 @@ dyn_mapping rows = excelReadSheet("C:/data/report.xlsx", "Sheet2", FALSE);
 //   | Alice | 30  | 95.5  |
 //   | Bob   | 25  | 87.0  |
 
+// With firstRowIsColumnNames = TRUE (default):
 DebugN(rows[1]["Name"]);   // "Alice"  (string)
 DebugN(rows[1]["Age"]);    // 30       (int)
 DebugN(rows[1]["Score"]);  // 95.5     (float)
+
+// With firstRowIsColumnNames = FALSE:
+dyn_mapping rows = excelReadSheet("C:/data/report.xlsx", "", TRUE, FALSE);
+DebugN(rows[1][1]);  // "Name"   (string)
+DebugN(rows[1][2]);  // "Age"    (string)
+DebugN(rows[2][1]);  // "Alice"  (string)
+DebugN(rows[2][2]);  // 30       (int)
 ```
 
 ### `excelReadFile`
 
 ```ctrl
-dyn_dyn_mapping excelReadFile(string filename, bool skipHiddenRows)
+dyn_dyn_mapping excelReadFile(string filename, bool skipHiddenRows = TRUE, bool firstRowIsColumnNames = TRUE)
 ```
 
-Reads all sheets in the file at once. Returns a `dyn_dyn_mapping` where each element is one sheet (a `dyn_mapping` of rows). The `skipHiddenRows` parameter is optional and defaults to `TRUE`.
+Reads all sheets in the file at once. Returns a `dyn_dyn_mapping` where each element is one sheet (a `dyn_mapping` of rows).
+
+- **skipHiddenRows** — optional, defaults to `TRUE`.
+- **firstRowIsColumnNames** — optional, defaults to `TRUE`.
 
 Use `excelGetSheetNames` to map sheet indices to names.
 

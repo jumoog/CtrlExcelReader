@@ -20,13 +20,13 @@
 //   BOOLEAN  -> BitVar
 //   DATE     -> TimeVar (Excel serial converted to time_t)
 //   STRING / NONE -> TextVar
-static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
+static void setTypedCell(MappingVar &row, const Variable &key, xlsxioread_cell cell)
 {
   const char *value = cell->data;
 
   if ( !value || !*value )
   {
-    row.setAt(TextVar(key), TextVar(""));
+    row.setAt(key, TextVar(""));
     return;
   }
 
@@ -38,21 +38,21 @@ static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
       long lval = strtol(value, &end, 10);
       if ( *end == '\0' && end != value && lval >= INT_MIN && lval <= INT_MAX )
       {
-        row.setAt(TextVar(key), IntegerVar(static_cast<int>(lval)));
+        row.setAt(key, IntegerVar(static_cast<int>(lval)));
         return;
       }
       double dval = strtod(value, &end);
       if ( *end == '\0' && end != value )
       {
-        row.setAt(TextVar(key), FloatVar(dval));
+        row.setAt(key, FloatVar(dval));
         return;
       }
-      row.setAt(TextVar(key), TextVar(value));
+      row.setAt(key, TextVar(value));
       return;
     }
     case XLSXIOREAD_CELL_TYPE_BOOLEAN:
     {
-      row.setAt(TextVar(key), BitVar(value[0] != '0'));
+      row.setAt(key, BitVar(value[0] != '0'));
       return;
     }
     case XLSXIOREAD_CELL_TYPE_DATE:
@@ -75,14 +75,14 @@ static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
         time_t sec = mktime(&components);
 
         PVSSshort milli = static_cast<PVSSshort>(frac * 1000.0);
-        row.setAt(TextVar(key), TimeVar(sec, milli));
+        row.setAt(key, TimeVar(sec, milli));
         return;
       }
-      row.setAt(TextVar(key), TextVar(value));
+      row.setAt(key, TextVar(value));
       return;
     }
     default:
-      row.setAt(TextVar(key), TextVar(value));
+      row.setAt(key, TextVar(value));
       return;
   }
 }
@@ -116,10 +116,10 @@ static void readSheetRows(xlsxioreadersheet sheet, DynVar &result, bool useHeade
     xlsxioread_cell cell;
     while ( (cell = xlsxioread_sheet_next_cell_struct(sheet)) != nullptr )
     {
-      const char *key = (useHeaders && colIdx < (int)headers.size())
-        ? headers[colIdx].c_str()
-        : std::to_string(colIdx + 1).c_str();
-      setTypedCell(rowMap, key, cell);
+      if ( useHeaders && colIdx < (int)headers.size() )
+        setTypedCell(rowMap, TextVar(headers[colIdx].c_str()), cell);
+      else
+        setTypedCell(rowMap, IntegerVar(colIdx + 1), cell);
       free(cell);
       colIdx++;
     }
