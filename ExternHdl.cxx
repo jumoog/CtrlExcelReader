@@ -234,7 +234,6 @@ static FunctionListRec fnList[] =
   { DYNMAPPING_VAR,    "excelReadSheet",     "(string filename, string sheetName, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)", false },
   { MAPPING_VAR,       "excelReadFile",      "(string filename, bool skipHiddenRows = true, bool firstRowIsColumnNames = true)",                   false },
   { BIT_VAR,           "excelWriteSheet",    "(string filename, string sheetName, dyn_mapping data)",                                              false },
-  { BIT_VAR,           "excelWriteFile",     "(string filename, mapping data)",                                                                    false },
 };
 
 CTRL_EXTENSION(ExternHdl, fnList)
@@ -249,7 +248,6 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
     F_excelReadSheet     = 1,
     F_excelReadFile      = 2,
     F_excelWriteSheet    = 3,
-    F_excelWriteFile     = 4,
   };
 
   static DynVar dynTextResult;
@@ -442,55 +440,6 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         return &writeResult;
 
       bool ok = writeSheetData(writer, dataVar);
-      int closeResult = xlsxiowrite_close(writer);
-
-      if ( ok && closeResult == 0 )
-        writeResult = BitVar(true);
-
-      return &writeResult;
-    }
-
-    // -------------------------------------------------------------------------
-    // excelWriteFile(string filename, mapping data) -> bool
-    // Writes sheets from a mapping where keys are sheet names and
-    // values are dyn_mapping (rows).
-    // xlsxio only supports one sheet per file, so only the first entry is written.
-    case F_excelWriteFile:
-    {
-      param.thread->clearLastError();
-      writeResult = BitVar(false);
-
-      TextVar filenameVar;
-      filenameVar = *(param.args->getFirst()->evaluate(param.thread));
-
-      MappingVar dataVar;
-      dataVar = *(param.args->getNext()->evaluate(param.thread));
-
-      unsigned int numSheets = dataVar.getNumberOfItems();
-      if ( numSheets == 0 )
-      {
-        writeResult = BitVar(true);
-        return &writeResult;
-      }
-
-      // Use the first entry: key = sheet name, value = dyn_mapping
-      Variable *sheetNameKey = dataVar.getKey(0);
-      Variable *sheetDataVar = dataVar.getValue(0);
-
-      if ( !sheetNameKey || !sheetDataVar || !sheetDataVar->isDynVar() )
-        return &writeResult;
-
-      CharString sheetNameStr = sheetNameKey->formatValue(CharString());
-      const DynVar *sheetData = static_cast<const DynVar *>(sheetDataVar);
-
-      xlsxiowriter writer = xlsxiowrite_open(
-        filenameVar.getValue(),
-        sheetNameStr.c_str()
-      );
-      if ( !writer )
-        return &writeResult;
-
-      bool ok = writeSheetData(writer, *sheetData);
       int closeResult = xlsxiowrite_close(writer);
 
       if ( ok && closeResult == 0 )
