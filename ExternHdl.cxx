@@ -272,6 +272,11 @@ static bool writeSheetData(XLWorksheet &wks, DynVar &data)
     columnNames.push_back(key->formatValue(CharString()));
   }
 
+  // Track max character width per column (init with header lengths)
+  std::vector<size_t> maxWidths(numCols);
+  for ( unsigned int c = 0; c < numCols; c++ )
+    maxWidths[c] = strlen(columnNames[c].c_str());
+
   // Write column headers in row 1
   for ( unsigned int c = 0; c < numCols; c++ )
     wks.cell(1, static_cast<uint16_t>(c + 1)).value() =
@@ -296,8 +301,21 @@ static bool writeSheetData(XLWorksheet &wks, DynVar &data)
         static_cast<uint16_t>(c + 1)
       );
       writeTypedCell(cell, cellVal);
+
+      if ( cellVal )
+      {
+        CharString str = cellVal->formatValue(CharString());
+        size_t len = strlen(str.c_str());
+        if ( len > maxWidths[c] )
+          maxWidths[c] = len;
+      }
     }
   }
+
+  // Set column widths (character width + padding)
+  for ( unsigned int c = 0; c < numCols; c++ )
+    wks.column(static_cast<uint16_t>(c + 1))
+        .setWidth(static_cast<float>(maxWidths[c]) + 2.0f);
 
   return true;
 }
