@@ -3,11 +3,13 @@
 #include <DynVar.hxx>
 #include <FloatVar.hxx>
 #include <MappingVar.hxx>
+#include <TimeVar.hxx>
 
 #include <xlsxio_read.h>
 
 #include <cstdlib>
 #include <climits>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -16,7 +18,7 @@
 // Set a mapping value using the cell type reported by xlsxio.
 //   VALUE    -> IntegerVar or FloatVar (parsed from string)
 //   BOOLEAN  -> BitVar
-//   DATE     -> TextVar (kept as string)
+//   DATE     -> TimeVar (Excel serial converted to time_t)
 //   STRING / NONE -> TextVar
 static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
 {
@@ -53,7 +55,32 @@ static void setTypedCell(MappingVar &row, const char *key, xlsxioread_cell cell)
       row.setAt(TextVar(key), BitVar(value[0] != '0'));
       return;
     }
+    case XLSXIOREAD_CELL_TYPE_DATE:
+    {
+      // Excel stores dates as a serial number (days since Dec 30, 1899).
+      // 25569 is the serial for Jan 1, 1970 (Unix epoch) in Excel's system,
+      // which includes the historical Feb 29, 1900 leap-year bug.
+      // Excel dates carry no timezone — treat them as local time.
+      char *end = nullptr;
+      double serial = strtod(value, &end);
+      if ( *end == '\0' && end != value )
+      {
+        double totalSeconds = (serial - 25569.0) * 86400.0;
+        time_t naive = static_cast<time_t>(floor(totalSeconds));
+        double frac = totalSeconds - floor(totalSeconds);
 
+        // Decompose as UTC, then reinterpret as local time via mktime
+        struct tm components = *gmtime(&naive);
+        components.tm_isdst = -1;
+        time_t sec = mktime(&components);
+
+        PVSSshort milli = static_cast<PVSSshort>(frac * 1000.0);
+        row.setAt(TextVar(key), TimeVar(sec, milli));
+        return;
+      }
+      row.setAt(TextVar(key), TextVar(value));
+      return;
+    }
     default:
       row.setAt(TextVar(key), TextVar(value));
       return;

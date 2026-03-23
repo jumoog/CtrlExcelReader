@@ -32,7 +32,8 @@ Cell values are automatically typed based on the Excel cell type:
 - Numeric integers → `int`
 - Numeric decimals → `float`
 - Booleans → `bool`
-- Strings, dates, and everything else → `string`
+- Dates/times → `time` (Excel serial converted to WinCC OA time)
+- Strings and everything else → `string`
 
 ```ctrl
 // Read the first sheet, skip hidden rows (default)
