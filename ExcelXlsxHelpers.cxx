@@ -23,6 +23,8 @@ using namespace OpenXLSX;
 
 namespace
 {
+  constexpr uint32_t EXCEL_FMT_DATE_TIME = 22;
+
   const Variable *unwrapAnyOrMixed(const Variable *val)
   {
     const Variable *current = val;
@@ -35,6 +37,43 @@ namespace
     }
 
     return current;
+  }
+
+  bool toLocalCalendarTime(time_t sec, std::tm &outTm)
+  {
+#ifdef _WIN32
+    return localtime_s(&outTm, &sec) == 0;
+#else
+    return localtime_r(&sec, &outTm) != nullptr;
+#endif
+  }
+
+  XLStyleIndex createBoldHeaderFormat(XLDocument &doc)
+  {
+    XLStyleIndex boldFontIdx = doc.styles().fonts().create(
+      doc.styles().fonts().fontByIndex(0));
+    doc.styles().fonts().fontByIndex(boldFontIdx).setBold(true);
+
+    XLStyleIndex boldFmtIdx = doc.styles().cellFormats().create(
+      doc.styles().cellFormats().cellFormatByIndex(0));
+    doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx)
+      .setFontIndex(boldFontIdx);
+    doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx)
+      .setApplyFont(true);
+
+    return boldFmtIdx;
+  }
+
+  XLStyleIndex createDateTimeFormat(XLDocument &doc)
+  {
+    XLStyleIndex dateTimeFmtIdx = doc.styles().cellFormats().create(
+      doc.styles().cellFormats().cellFormatByIndex(0));
+    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx)
+      .setNumberFormatId(EXCEL_FMT_DATE_TIME);
+    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx)
+      .setApplyNumberFormat(true);
+
+    return dateTimeFmtIdx;
   }
 
   //----------------------------------------------------------------------------
@@ -209,18 +248,10 @@ namespace
         // local calendar fields first, then write those fields as XLDateTime
         // so displayed wall-clock time matches WinCC OA local time.
         std::tm localTm{};
-#ifdef _WIN32
-        errno_t rc = localtime_s(&localTm, &sec);
-        if (rc == 0)
+        if (toLocalCalendarTime(sec, localTm))
           cell.value() = XLDateTime(localTm);
         else
           cell.value() = XLDateTime(sec);
-#else
-        if (localtime_r(&sec, &localTm) != nullptr)
-          cell.value() = XLDateTime(localTm);
-        else
-          cell.value() = XLDateTime(sec);
-#endif
 
         cell.setCellFormat(dateTimeFmtIdx);
         return;
@@ -336,17 +367,11 @@ namespace ExcelXlsxHelpers
     // Create bold cell format for the header row.
     // XLFont/XLCellFormat are XML-node proxies: call create() first to duplicate
     // the default entry, then modify the new entry so the default is not mutated.
-    XLStyleIndex boldFontIdx = doc.styles().fonts().create(doc.styles().fonts().fontByIndex(0));
-    doc.styles().fonts().fontByIndex(boldFontIdx).setBold(true);
-    XLStyleIndex boldFmtIdx = doc.styles().cellFormats().create(doc.styles().cellFormats().cellFormatByIndex(0));
-    doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setFontIndex(boldFontIdx);
-    doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setApplyFont(true);
+    XLStyleIndex boldFmtIdx = createBoldHeaderFormat(doc);
 
     // Built-in format 22: date + time display. Without a date format, Excel
     // shows the serial value (e.g. 46105.837...).
-    XLStyleIndex dateTimeFmtIdx = doc.styles().cellFormats().create(doc.styles().cellFormats().cellFormatByIndex(0));
-    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx).setNumberFormatId(22);
-    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx).setApplyNumberFormat(true);
+    XLStyleIndex dateTimeFmtIdx = createDateTimeFormat(doc);
 
     // Write column headers in row 1 (bold)
     for (unsigned int c = 0; c < numCols; c++)
