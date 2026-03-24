@@ -9,6 +9,8 @@
 #include <TimeVar.hxx>
 
 #include <OpenXLSX.hpp>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -196,6 +198,21 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
 
       try
       {
+        // Check if file exists and is locked/opened by another process
+        std::filesystem::path filePath(filenameVar.getValue());
+        if ( std::filesystem::exists(filePath) )
+        {
+          // Try to open the file in write mode to check if it's accessible
+          std::ofstream testWrite(filePath, std::ios::out | std::ios::app);
+          if ( !testWrite.is_open() )
+          {
+            // File is likely opened by another process (e.g., Excel)
+            writeResult = BitVar(false);
+            return &writeResult;
+          }
+          testWrite.close();
+        }
+
         XLDocument doc;
         doc.create(filenameVar.getValue(), XLForceOverwrite);
         doc.setProperty(XLProperty::Creator, "WinCC OA");
@@ -243,6 +260,21 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
 
       try
       {
+        // Check if file exists and is locked/opened by another process
+        std::filesystem::path filePath(filenameVar.getValue());
+        if ( std::filesystem::exists(filePath) )
+        {
+          // Try to open the file in write mode to check if it's accessible
+          std::ofstream testWrite(filePath, std::ios::out | std::ios::app);
+          if ( !testWrite.is_open() )
+          {
+            // File is likely opened by another process (e.g., Excel)
+            writeResult = BitVar(false);
+            return &writeResult;
+          }
+          testWrite.close();
+        }
+
         XLDocument doc;
         doc.create(filenameVar.getValue(), XLForceOverwrite);
         doc.setProperty(XLProperty::Creator, "WinCC OA");
