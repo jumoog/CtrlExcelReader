@@ -246,8 +246,9 @@ namespace ExcelXlsxHelpers
       return;
 
     std::vector<std::string> headers;
+    headers.reserve(colCount);
     uint32_t dataStartRow = 1;
-
+  
     if (useHeaders)
     {
       for (uint16_t c = 1; c <= colCount; c++)
