@@ -13,6 +13,7 @@
 
 #include <cctype>
 #include <climits>
+#include <unordered_map>
 #include <cmath>
 #include <cstring>
 #include <ctime>
@@ -209,6 +210,98 @@ namespace
     }
   }
 
+  // setTypedCell variant that uses a pre-fetched XLStyles reference and a
+  // caller-owned format-index → is_date cache to avoid redundant style lookups.
+  void setTypedCellCached(MappingVar &row, const Variable &key,
+                          XLCell &cell,
+                          const XLStyles &styles,
+                          std::unordered_map<XLStyleIndex, bool> &dateCache)
+  {
+    XLCellValue val = cell.value();
+    auto type = val.type();
+
+    switch (type)
+    {
+      case XLValueType::Empty:
+        row.setAt(key, TextVar(""));
+        return;
+
+      case XLValueType::Boolean:
+        row.setAt(key, BitVar(val.get<bool>()));
+        return;
+
+      case XLValueType::Integer:
+        row.setAt(key, IntegerVar(static_cast<int>(val.get<int64_t>())));
+        return;
+
+      case XLValueType::Float:
+      {
+        bool isDate = false;
+        try
+        {
+          XLStyleIndex styleIdx = cell.cellFormat();
+          auto it = dateCache.find(styleIdx);
+          if (it != dateCache.end())
+          {
+            isDate = it->second;
+          }
+          else
+          {
+            auto fmt = styles.cellFormats().cellFormatByIndex(styleIdx);
+            unsigned int fmtId = fmt.numberFormatId();
+            isDate = isBuiltinDateFormatId(fmtId);
+            if (!isDate && fmtId >= 164)
+            {
+              std::string code = styles.numberFormats()
+                                       .numberFormatById(fmtId)
+                                       .formatCode();
+              isDate = isDateFormatCode(code);
+            }
+            dateCache[styleIdx] = isDate;
+          }
+        }
+        catch (...) {}
+
+        if (isDate)
+        {
+          XLDateTime dt = val.get<XLDateTime>();
+          std::tm tm = dt.tm();
+          tm.tm_isdst = -1;
+          time_t sec = mktime(&tm);
+
+          double serial = dt.serial();
+          double frac = serial - floor(serial);
+          PVSSshort milli = static_cast<PVSSshort>(frac * 86400.0 * 1000.0
+                             - floor(frac * 86400.0) * 1000.0);
+          row.setAt(key, TimeVar(sec, milli));
+        }
+        else
+        {
+          double dval = val.get<double>();
+          double intpart;
+          if (modf(dval, &intpart) == 0.0
+           && intpart >= INT_MIN && intpart <= INT_MAX)
+          {
+            row.setAt(key, IntegerVar(static_cast<int>(intpart)));
+          }
+          else
+          {
+            row.setAt(key, FloatVar(dval));
+          }
+        }
+        return;
+      }
+
+      case XLValueType::String:
+        row.setAt(key, TextVar(val.get<std::string>().c_str()));
+        return;
+
+      default:
+        row.setAt(key, TextVar(""));
+        return;
+    }
+  }
+
   //----------------------------------------------------------------------------
   // Write helpers
   //----------------------------------------------------------------------------
@@ -301,32 +394,36 @@ namespace ExcelXlsxHelpers
   
     if (useHeaders)
     {
-      for (uint16_t c = 1; c <= colCount; c++)
+      for (auto& cell : wks.row(1).cells(colCount))
       {
-        auto cell = wks.cell(1, c);
         XLCellValue val = cell.value();
         if (val.type() == XLValueType::Empty)
           headers.emplace_back("");
         else
-          headers.push_back(val.get<std::string>());
+          headers.emplace_back(val.get<std::string>());
       }
       dataStartRow = 2;
     }
 
-    for (uint32_t r = dataStartRow; r <= rowCount; r++)
+    // Pre-fetch styles once and cache format-index → is_date results so each
+    // unique cell format is inspected only once across the entire sheet.
+    XLStyles styles = doc.styles();
+    std::unordered_map<XLStyleIndex, bool> dateCache;
+
+    for (auto& xlRow : wks.rows(dataStartRow, rowCount))
     {
-      auto xlRow = wks.row(r);
       if (skipHidden && xlRow.isHidden())
         continue;
 
       MappingVar rowMap;
-      for (uint16_t c = 1; c <= colCount; c++)
+      uint16_t c = 1;
+      for (auto& cell : xlRow.cells(colCount))
       {
-        auto cell = wks.cell(r, c);
         if (useHeaders && (c - 1) < static_cast<uint16_t>(headers.size()))
-          setTypedCell(rowMap, TextVar(headers[c - 1].c_str()), cell, doc);
+          setTypedCellCached(rowMap, TextVar(headers[c - 1].c_str()), cell, styles, dateCache);
         else
-          setTypedCell(rowMap, IntegerVar(c), cell, doc);
+          setTypedCellCached(rowMap, IntegerVar(c), cell, styles, dateCache);
+        ++c;
       }
       result.append(rowMap);
     }
