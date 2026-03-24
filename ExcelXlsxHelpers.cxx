@@ -175,7 +175,8 @@ namespace
   //----------------------------------------------------------------------------
 
   // Write a single WinCC OA Variable to an OpenXLSX cell.
-  void writeTypedCell(XLCell &cell, const Variable *val)
+  void writeTypedCell(XLCell &cell, const Variable *val,
+                      XLStyleIndex dateTimeFmtIdx)
   {
     if (!val)
     {
@@ -203,7 +204,25 @@ namespace
       {
         time_t sec = static_cast<time_t>(
           static_cast<const TimeVar *>(val)->getSeconds());
-        cell.value() = XLDateTime(sec);
+
+        // Excel date/time serials have no timezone. Convert epoch seconds to
+        // local calendar fields first, then write those fields as XLDateTime
+        // so displayed wall-clock time matches WinCC OA local time.
+        std::tm localTm{};
+#ifdef _WIN32
+        errno_t rc = localtime_s(&localTm, &sec);
+        if (rc == 0)
+          cell.value() = XLDateTime(localTm);
+        else
+          cell.value() = XLDateTime(sec);
+#else
+        if (localtime_r(&sec, &localTm) != nullptr)
+          cell.value() = XLDateTime(localTm);
+        else
+          cell.value() = XLDateTime(sec);
+#endif
+
+        cell.setCellFormat(dateTimeFmtIdx);
         return;
       }
       case TEXT_VAR:
@@ -220,7 +239,7 @@ namespace
           return;
         }
 
-        writeTypedCell(cell, inner);
+        writeTypedCell(cell, inner, dateTimeFmtIdx);
         return;
       }
       default:
@@ -323,6 +342,12 @@ namespace ExcelXlsxHelpers
     doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setFontIndex(boldFontIdx);
     doc.styles().cellFormats().cellFormatByIndex(boldFmtIdx).setApplyFont(true);
 
+    // Built-in format 22: date + time display. Without a date format, Excel
+    // shows the serial value (e.g. 46105.837...).
+    XLStyleIndex dateTimeFmtIdx = doc.styles().cellFormats().create(doc.styles().cellFormats().cellFormatByIndex(0));
+    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx).setNumberFormatId(22);
+    doc.styles().cellFormats().cellFormatByIndex(dateTimeFmtIdx).setApplyNumberFormat(true);
+
     // Write column headers in row 1 (bold)
     for (unsigned int c = 0; c < numCols; c++)
     {
@@ -349,7 +374,7 @@ namespace ExcelXlsxHelpers
           static_cast<uint32_t>(r + 2),
           static_cast<uint16_t>(c + 1)
         );
-        writeTypedCell(cell, cellVal);
+        writeTypedCell(cell, cellVal, dateTimeFmtIdx);
 
         if (cellVal)
         {
