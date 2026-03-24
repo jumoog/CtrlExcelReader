@@ -1,11 +1,13 @@
 #include <ExcelXlsxHelpers.hxx>
 
 #include <BitVar.hxx>
+#include <AnyTypeVar.hxx>
 #include <DynVar.hxx>
 #include <FloatVar.hxx>
 #include <IntegerVar.hxx>
 #include <LongVar.hxx>
 #include <MappingVar.hxx>
+#include <MixedVar.hxx>
 #include <TextVar.hxx>
 #include <TimeVar.hxx>
 
@@ -21,6 +23,20 @@ using namespace OpenXLSX;
 
 namespace
 {
+  const Variable *unwrapAnyOrMixed(const Variable *val)
+  {
+    const Variable *current = val;
+
+    while (current
+        && (current->isA() == ANYTYPE_VAR || current->isA() == MIXED_VAR))
+    {
+      const AnyTypeVar *wrapped = static_cast<const AnyTypeVar *>(current);
+      current = wrapped->getVar();
+    }
+
+    return current;
+  }
+
   //----------------------------------------------------------------------------
   // Date-format detection helpers
   //   OpenXLSX reports dates as XLValueType::Float. We inspect the cell's
@@ -194,6 +210,19 @@ namespace
         cell.value() = std::string(
           static_cast<const TextVar *>(val)->getValue());
         return;
+      case ANYTYPE_VAR:
+      case MIXED_VAR:
+      {
+        const Variable *inner = unwrapAnyOrMixed(val);
+        if (!inner)
+        {
+          cell.value() = std::string();
+          return;
+        }
+
+        writeTypedCell(cell, inner);
+        return;
+      }
       default:
       {
         CharString str = val->formatValue(CharString());
