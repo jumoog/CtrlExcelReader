@@ -161,3 +161,7 @@ Add the extension to your WinCC OA config file:
 [ctrl]
 LoadCtrlLibs = "CtrlExcelReader"
 ```
+
+## Licenses
+
+This extension is licensed under the MIT License (see `LICENSE` file). It uses [OpenXLSX](https://github.com/troldal/OpenXLSX) which is licensed under the BSD 3-Clause License (see `THIRD-PARTY-LICENSES.txt`).
