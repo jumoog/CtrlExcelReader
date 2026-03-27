@@ -183,8 +183,21 @@ namespace
 
           double serial = dt.serial();
           double frac = serial - floor(serial);
-          PVSSshort milli = static_cast<PVSSshort>(frac * 86400.0 * 1000.0
-                             - floor(frac * 86400.0) * 1000.0);
+
+          // Convert fraction-of-day to milliseconds with rounding so
+          // floating-point noise does not turn exact .000 into .999.
+          const long long dayMillis = 24LL * 60LL * 60LL * 1000LL;
+          long long totalMillis = static_cast<long long>(llround(frac * static_cast<double>(dayMillis)));
+
+          if (totalMillis < 0)
+            totalMillis = 0;
+          else if (totalMillis >= dayMillis)
+          {
+            totalMillis = 0;
+            sec += 1;
+          }
+
+          PVSSshort milli = static_cast<PVSSshort>(totalMillis % 1000LL);
           row.setAt(key, TimeVar(sec, milli));
         }
         else
