@@ -221,7 +221,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         const char *sheetname = sheetnameVar.getValue();
         std::string sheetName = (*sheetname) ? sheetname : "Sheet1";
 
-        auto &wb = doc.workbook();
+        auto wb = doc.workbook();
         wb.worksheet(1).setName(sheetName);
 
         auto wks = wb.worksheet(sheetName);
@@ -280,7 +280,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
         doc.setProperty(XLProperty::Creator, "WinCC OA");
         doc.setProperty(XLProperty::LastModifiedBy, "WinCC OA");
 
-        auto &wb = doc.workbook();
+        auto wb = doc.workbook();
         bool ok = true;
 
         for ( unsigned int s = 0; s < numSheets; s++ )
