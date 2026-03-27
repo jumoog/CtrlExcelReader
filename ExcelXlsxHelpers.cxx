@@ -117,32 +117,6 @@ namespace
     return false;
   }
 
-  // Check whether a cell's number format indicates a date.
-  bool isCellDate(XLDocument &doc, const XLCell &cell)
-  {
-    try
-    {
-      auto styles = doc.styles();
-      auto styleIdx = cell.cellFormat();
-      auto fmt = styles.cellFormats().cellFormatByIndex(styleIdx);
-      unsigned int fmtId = fmt.numberFormatId();
-
-      if (isBuiltinDateFormatId(fmtId))
-        return true;
-
-      if (fmtId >= 164)
-      {
-        std::string code = styles.numberFormats()
-                                 .numberFormatById(fmtId)
-                                 .formatCode();
-        return isDateFormatCode(code);
-      }
-    }
-    catch (...) {}
-
-    return false;
-  }
-
   //----------------------------------------------------------------------------
   // Read helpers
   //----------------------------------------------------------------------------
