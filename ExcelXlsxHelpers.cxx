@@ -147,71 +147,9 @@ namespace
   // Read helpers
   //----------------------------------------------------------------------------
 
-  // Set a mapping value using the cell type reported by OpenXLSX.
-  void setTypedCell(MappingVar &row, const Variable &key,
-                    XLCell &cell, XLDocument &doc)
-  {
-    XLCellValue val = cell.value();
-    auto type = val.type();
-
-    switch (type)
-    {
-      case XLValueType::Empty:
-        row.setAt(key, TextVar(""));
-        return;
-
-      case XLValueType::Boolean:
-        row.setAt(key, BitVar(val.get<bool>()));
-        return;
-
-      case XLValueType::Integer:
-        row.setAt(key, IntegerVar(static_cast<int>(val.get<int64_t>())));
-        return;
-
-      case XLValueType::Float:
-      {
-        if (isCellDate(doc, cell))
-        {
-          XLDateTime dt = val.get<XLDateTime>();
-          std::tm tm = dt.tm();
-          tm.tm_isdst = -1;
-          time_t sec = mktime(&tm);
-
-          double serial = dt.serial();
-          double frac = serial - floor(serial);
-          PVSSshort milli = static_cast<PVSSshort>(frac * 86400.0 * 1000.0
-                             - floor(frac * 86400.0) * 1000.0);
-          row.setAt(key, TimeVar(sec, milli));
-        }
-        else
-        {
-          double dval = val.get<double>();
-          double intpart;
-          if (modf(dval, &intpart) == 0.0
-           && intpart >= INT_MIN && intpart <= INT_MAX)
-          {
-            row.setAt(key, IntegerVar(static_cast<int>(intpart)));
-          }
-          else
-          {
-            row.setAt(key, FloatVar(dval));
-          }
-        }
-        return;
-      }
-
-      case XLValueType::String:
-        row.setAt(key, TextVar(val.get<std::string>().c_str()));
-        return;
-
-      default:
-        row.setAt(key, TextVar(""));
-        return;
-    }
-  }
-
-  // setTypedCell variant that uses a pre-fetched XLStyles reference and a
-  // caller-owned format-index → is_date cache to avoid redundant style lookups.
+  // Set a mapping value using the cell type reported by OpenXLSX, using a
+  // pre-fetched XLStyles reference and a caller-owned format-index → is_date
+  // cache to avoid redundant style lookups.
   void setTypedCellCached(MappingVar &row, const Variable &key,
                           XLCell &cell,
                           const XLStyles &styles,
