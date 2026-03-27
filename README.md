@@ -130,30 +130,54 @@ bool ok = excelWriteFile("C:/data/output.xlsx", data);
 
 ### Prerequisites
 
-- WinCC OA 3.20 API
-- [vcpkg](https://github.com/microsoft/vcpkg)
+- WinCC OA 3.20 API (set `API_ROOT` to your WinCC OA `api/` directory)
+- [vcpkg](https://github.com/microsoft/vcpkg) (set `VCPKG_ROOT`)
 - CMake 3.15+
-- Visual Studio (Windows)
+- Windows: Visual Studio (uses the `vs2022-vcpkg` preset)
+- Linux: a C++ toolchain + `make` (uses `Unix Makefiles`)
 
-### Install dependencies
+This repository uses **vcpkg manifest mode** (`vcpkg.json`). Dependencies are
+resolved automatically when you configure with the vcpkg toolchain.
 
-```sh
-vcpkg install --triplet x64-windows-static-md
+### Configure and build (Windows)
+
+PowerShell:
+
+```powershell
+$env:API_ROOT = "C:\Siemens\Automation\WinCC_OA\3.20\api"
+
+cmake --preset vs2022-vcpkg
+cmake --build --preset relwithdebinfo
 ```
 
-### Configure and build
+Debug build:
+
+```powershell
+cmake --build --preset debug
+```
+
+### Configure and build (Linux)
 
 ```sh
-cmake -B build ^
-  -DCMAKE_TOOLCHAIN_FILE=C:/Repos/vcpkg/scripts/buildsystems/vcpkg.cmake ^
-  -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+export API_ROOT=/opt/WinCC_OA/3.20/api
 
-cmake --build build --config RelWithDebInfo
+cmake --preset linux-vcpkg-relwithdebinfo
+cmake --build --preset linux-relwithdebinfo
+```
+
+Debug build:
+
+```sh
+cmake --preset linux-vcpkg-debug
+cmake --build --preset linux-debug
 ```
 
 ### Install
 
-Copy the built `CtrlExcelReader.dll` from `build/RelWithDebInfo/` into your WinCC OA project's `bin/` directory.
+Copy the built library into your WinCC OA project's `bin/` directory:
+
+- Windows: `build/RelWithDebInfo/CtrlExcelReader.dll` (or `build/Debug/...`)
+- Linux: `build-linux-relwithdebinfo/CtrlExcelReader.so` (or `build-linux-debug/...`)
 
 Add the extension to your WinCC OA config file:
 

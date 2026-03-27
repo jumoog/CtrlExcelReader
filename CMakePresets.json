@@ -17,6 +17,39 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
+    },
+    {
+      "name": "linux-vcpkg-base",
+      "displayName": "Linux + vcpkg (manifest)",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "linux-vcpkg-relwithdebinfo",
+      "displayName": "Linux + vcpkg (manifest) - RelWithDebInfo",
+      "inherits": "linux-vcpkg-base",
+      "binaryDir": "${sourceDir}/build-linux-relwithdebinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "linux-vcpkg-debug",
+      "displayName": "Linux + vcpkg (manifest) - Debug",
+      "inherits": "linux-vcpkg-base",
+      "binaryDir": "${sourceDir}/build-linux-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
@@ -31,6 +64,16 @@
       "displayName": "Debug",
       "configurePreset": "vs2022-vcpkg",
       "configuration": "Debug"
+    },
+    {
+      "name": "linux-relwithdebinfo",
+      "displayName": "Linux RelWithDebInfo",
+      "configurePreset": "linux-vcpkg-relwithdebinfo"
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux Debug",
+      "configurePreset": "linux-vcpkg-debug"
     }
   ]
 }
