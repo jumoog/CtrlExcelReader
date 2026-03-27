@@ -19,13 +19,13 @@
 */
 void main()
 {
-  excelRoundTripTest();
+  excelRoundTripTestSingle();
+  excelRoundTripTestFile();
 }
 
 // Minimal round-trip smoke test for CtrlExcelReader.
 // Writes an .xlsx using excelWriteFile() and reads it back using excelReadFile().
-
-bool excelRoundTripTest(string filename = "")
+bool excelRoundTripTestSingle(string filename = "")
 {
   // Pick a temporary file if none provided.
   if (filename == "")
@@ -60,13 +60,107 @@ bool excelRoundTripTest(string filename = "")
   row2["Active"] = FALSE;
   row2["Time"] = t2;
   dynAppend(rows, row2);
-
+  
   // Write
-  bool ok =excelWriteSheet(filename, "People", rows);
+  bool ok = excelWriteSheet(filename, "People", rows);
 
   if (!ok)
   {
     DebugN("excelRoundTripTest: excelWriteFile failed", filename);
+    return FALSE;
+  }
+  
+  dyn_string dsSheets = excelGetSheetNames(filename);
+  
+  ok = dsSheets.contains("People");
+
+  if (!ok)
+  {
+    DebugN("excelRoundTripTest: excelGetSheetNames failed", filename);
+    return FALSE;
+  }
+             
+  // Read back
+  dyn_mapping back = excelReadSheet(filename, "People");
+
+  bool pass = TRUE;
+
+  // Value checks (headers enabled by writer)
+  if (back[1]["Name"] != "Alice") pass = FALSE;
+
+  if (back[1]["Age"] != 30) pass = FALSE;
+
+  if (back[1]["Active"] != TRUE) pass = FALSE;
+
+  if (back[1]["Time"] != t1) pass = FALSE;
+
+  if (back[2]["Name"] != "Bob") pass = FALSE;
+
+  if (back[2]["Age"] != 25) pass = FALSE;
+
+  if (back[2]["Active"] != FALSE) pass = FALSE;
+
+  if (back[2]["Time"] != t2) pass = FALSE;
+
+  DebugTN("excelRoundTripTest", "file", filename, "pass", pass);
+
+  if (!pass)
+  {
+    DebugTN("excelRoundTripTest: read-back data", back);
+  }
+
+  // Cleanup (best-effort)
+  remove(filename);
+
+  return pass;
+}
+
+// Minimal round-trip smoke test for CtrlExcelReader.
+// Writes an .xlsx using excelWriteFile() and reads it back using excelReadFile().
+bool excelRoundTripTestFile(string filename = "")
+{
+  // Pick a temporary file if none provided.
+  if (filename == "")
+  {
+    filename = tmpnam();
+
+    if (filename == "")
+    {
+      DebugTN("excelRoundTripTestFile: tmpnam failed");
+      return FALSE;
+    }
+  }
+
+  // Build sample data (one sheet: "People")
+  dyn_anytype rows;
+  mapping row;
+  time now = getCurrentTime();
+  // it will fail with milliseconds
+  time t1  = makeTime(year(now), month(now), day(now), hour(now), minute(now), second(now));
+  time t2 = makeTime(2026, 1, 1, 1, 1, 1);
+  row["Name"] = "Alice";
+  row["Age"] = 30;
+  row["Score"] = 95.5;
+  row["Active"] = TRUE;
+  row["Time"] = t1;
+  dynAppend(rows, row);
+
+  mapping row2;
+  row2["Name"] = "Bob";
+  row2["Age"] = 25;
+  row2["Score"] = 87.0;
+  row2["Active"] = FALSE;
+  row2["Time"] = t2;
+  dynAppend(rows, row2);
+
+  mapping data;
+  data["People"] = rows;
+  // Write
+  bool ok = excelWriteFile(filename, data);
+
+  if (!ok)
+  {
+    DebugN("excelRoundTripTestFile: excelWriteFile failed", filename);
     return FALSE;
   }
 
@@ -92,11 +186,11 @@ bool excelRoundTripTest(string filename = "")
 
   if (back["People"][2]["Time"] != t2) pass = FALSE;
 
-  DebugTN("excelRoundTripTest", "file", filename, "pass", pass);
+  DebugTN("excelRoundTripTestFile", "file", filename, "pass", pass);
 
   if (!pass)
   {
-    DebugTN("excelRoundTripTest: read-back data", back);
+    DebugTN("excelRoundTripTestFile: read-back data", back);
   }
 
   // Cleanup (best-effort)
