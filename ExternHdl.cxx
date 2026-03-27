@@ -2,39 +2,15 @@
 
 #include <ExcelXlsxHelpers.hxx>
 
-#include <AnyTypeVar.hxx>
 #include <DynVar.hxx>
-#include <FloatVar.hxx>
-#include <LongVar.hxx>
 #include <MappingVar.hxx>
-#include <TimeVar.hxx>
 
 #include <OpenXLSX.hpp>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
 
 using namespace OpenXLSX;
-
-//------------------------------------------------------------------------------
-
-namespace
-{
-  const Variable *unwrapAnyOrMixed(const Variable *val)
-  {
-    const Variable *current = val;
-
-    while ( current
-        && (current->isA() == ANYTYPE_VAR || current->isA() == MIXED_VAR) )
-    {
-      const AnyTypeVar *wrapped = static_cast<const AnyTypeVar *>(current);
-      current = wrapped->getVar();
-    }
-
-    return current;
-  }
-}
 
 static FunctionListRec fnList[] =
 {
@@ -209,7 +185,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
       sheetnameVar = *(param.args->getNext() ->evaluate(param.thread));
 
       const Variable *dataPtr = param.args->getNext()->evaluate(param.thread);
-      dataPtr = unwrapAnyOrMixed(dataPtr);
+      dataPtr = ExcelXlsxHelpers::unwrapAnyOrMixed(dataPtr);
       if ( !dataPtr || !dataPtr->isDynVar() )
         return &writeResult;
 
@@ -315,7 +291,7 @@ const Variable *ExternHdl::execute(ExecuteParamRec &param)
           auto wks = wb.worksheet(sheetNameStr);
 
           const Variable *sheetDataVar = dataVar.getValue(s);
-          sheetDataVar = unwrapAnyOrMixed(sheetDataVar);
+          sheetDataVar = ExcelXlsxHelpers::unwrapAnyOrMixed(sheetDataVar);
           if ( !sheetDataVar || !sheetDataVar->isDynVar() )
             continue;
 

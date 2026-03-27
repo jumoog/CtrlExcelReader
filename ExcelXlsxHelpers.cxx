@@ -22,10 +22,8 @@
 
 using namespace OpenXLSX;
 
-namespace
+namespace ExcelXlsxHelpers
 {
-  constexpr uint32_t EXCEL_FMT_DATE_TIME = 22;
-
   const Variable *unwrapAnyOrMixed(const Variable *val)
   {
     const Variable *current = val;
@@ -39,6 +37,11 @@ namespace
 
     return current;
   }
+}
+
+namespace
+{
+  constexpr uint32_t EXCEL_FMT_DATE_TIME = 22;
 
   bool toLocalCalendarTime(time_t sec, std::tm &outTm)
   {
@@ -281,7 +284,7 @@ namespace
       case ANYTYPE_VAR:
       case MIXED_VAR:
       {
-        const Variable *inner = unwrapAnyOrMixed(val);
+        const Variable *inner = ExcelXlsxHelpers::unwrapAnyOrMixed(val);
         if (!inner)
         {
           cell.value() = std::string();
