@@ -23,178 +23,155 @@ void main()
   excelRoundTripTestFile();
 }
 
-// Minimal round-trip smoke test for CtrlExcelReader.
-// Writes an .xlsx using excelWriteFile() and reads it back using excelReadFile().
-bool excelRoundTripTestSingle(string filename = "")
+// Returns a temporary filename, or "" on failure.
+string getTempFile(string context)
 {
-  // Pick a temporary file if none provided.
+  string filename = tmpnam();
+
   if (filename == "")
   {
-    filename = tmpnam();
+    DebugTN(context + ": tmpnam failed");
+  }
 
-    if (filename == "")
+  return filename;
+}
+
+// Builds the shared two-row test dataset.
+// t1/t2 are set to the time values written, so callers can compare on read-back.
+dyn_anytype buildTestRows(time &t1, time &t2)
+{
+  time now = getCurrentTime();
+  // Strip milliseconds — Excel serial dates have second resolution.
+  t1 = makeTime(year(now), month(now), day(now), hour(now), minute(now), second(now));
+  t2 = makeTime(2026, 1, 1, 1, 1, 1);
+
+  mapping row1;
+  row1["Name"]   = "Alice";
+  row1["Age"]    = 30;
+  row1["Score"]  = 95.5;
+  row1["Active"] = TRUE;
+  row1["Time"]   = t1;
+
+  mapping row2;
+  row2["Name"]   = "Bob";
+  row2["Age"]    = 25;
+  row2["Score"]  = 87.0;
+  row2["Active"] = FALSE;
+  row2["Time"]   = t2;
+
+  dyn_anytype rows;
+  dynAppend(rows, row1);
+  dynAppend(rows, row2);
+  return rows;
+}
+
+// Verifies read-back rows against the expected values written by buildTestRows().
+bool checkRows(dyn_mapping rows, time t1, time t2, string context = "checkRows")
+{
+  if (dynlen(rows) != 2)
+  {
+    DebugTN(context + ": unexpected row count", dynlen(rows));
+    return false;
+  }
+
+  dyn_string missingKeys;
+  dyn_string keysToCheck = makeDynString("Name", "Age", "Active", "Time");
+
+  for (int row = 1; row <= 2; row++)
+  {
+    for (int k = 1; k <= dynlen(keysToCheck); k++)
     {
-      DebugTN("excelRoundTripTest: tmpnam failed");
-      return FALSE;
+      if (!mappingHasKey(rows[row], keysToCheck[k]))
+      {
+        dynAppend(missingKeys, "row" + row + "." + keysToCheck[k]);
+      }
     }
   }
 
-  // Build sample data (one sheet: "People")
-  dyn_anytype rows;
-  mapping row;
-  time now = getCurrentTime();
-  // it will fail with milliseconds
-  time t1  = makeTime(year(now), month(now), day(now), hour(now), minute(now), second(now));
-  time t2 = makeTime(2026, 1, 1, 1, 1, 1);
-  row["Name"] = "Alice";
-  row["Age"] = 30;
-  row["Score"] = 95.5;
-  row["Active"] = TRUE;
-  row["Time"] = t1;
-  dynAppend(rows, row);
-
-  mapping row2;
-  row2["Name"] = "Bob";
-  row2["Age"] = 25;
-  row2["Score"] = 87.0;
-  row2["Active"] = FALSE;
-  row2["Time"] = t2;
-  dynAppend(rows, row2);
-  
-  // Write
-  bool ok = excelWriteSheet(filename, "People", rows);
-
-  if (!ok)
+  if (dynlen(missingKeys) > 0)
   {
-    DebugN("excelRoundTripTest: excelWriteFile failed", filename);
-    return FALSE;
+    DebugTN(context + ": missing keys", missingKeys);
+    return false;
   }
-  
-  dyn_string dsSheets = excelGetSheetNames(filename);
-  
-  ok = dsSheets.contains("People");
 
-  if (!ok)
-  {
-    DebugN("excelRoundTripTest: excelGetSheetNames failed", filename);
-    return FALSE;
-  }
-             
-  // Read back
-  dyn_mapping back = excelReadSheet(filename, "People");
-
-  bool pass = TRUE;
-
-  // Value checks (headers enabled by writer)
-  if (back[1]["Name"] != "Alice") pass = FALSE;
-
-  if (back[1]["Age"] != 30) pass = FALSE;
-
-  if (back[1]["Active"] != TRUE) pass = FALSE;
-
-  if (back[1]["Time"] != t1) pass = FALSE;
-
-  if (back[2]["Name"] != "Bob") pass = FALSE;
-
-  if (back[2]["Age"] != 25) pass = FALSE;
-
-  if (back[2]["Active"] != FALSE) pass = FALSE;
-
-  if (back[2]["Time"] != t2) pass = FALSE;
-
-  DebugTN("excelRoundTripTest", "file", filename, "pass", pass);
+  bool pass = rows[1]["Name"]   == "Alice"
+              && rows[1]["Age"]    == 30
+              && rows[1]["Active"] == TRUE
+              && rows[1]["Time"]   == t1
+              && rows[2]["Name"]   == "Bob"
+              && rows[2]["Age"]    == 25
+              && rows[2]["Active"] == FALSE
+              && rows[2]["Time"]   == t2;
 
   if (!pass)
   {
-    DebugTN("excelRoundTripTest: read-back data", back);
+    DebugTN(context + ": value mismatch — read-back data", rows, "expected t1", t1, "expected t2", t2);
   }
-
-  // Cleanup (best-effort)
-  remove(filename);
 
   return pass;
 }
 
-// Minimal round-trip smoke test for CtrlExcelReader.
-// Writes an .xlsx using excelWriteFile() and reads it back using excelReadFile().
-bool excelRoundTripTestFile(string filename = "")
+// Round-trip test for excelWriteSheet / excelGetSheetNames / excelReadSheet.
+bool excelRoundTripTestSingle(string filename = "")
 {
-  // Pick a temporary file if none provided.
   if (filename == "")
   {
-    filename = tmpnam();
+    filename = getTempFile("excelRoundTripTestSingle");
 
-    if (filename == "")
-    {
-      DebugTN("excelRoundTripTestFile: tmpnam failed");
-      return FALSE;
-    }
+    if (filename == "") return FALSE;
   }
 
-  // Build sample data (one sheet: "People")
-  dyn_anytype rows;
-  mapping row;
-  time now = getCurrentTime();
-  // it will fail with milliseconds
-  time t1  = makeTime(year(now), month(now), day(now), hour(now), minute(now), second(now));
-  time t2 = makeTime(2026, 1, 1, 1, 1, 1);
-  row["Name"] = "Alice";
-  row["Age"] = 30;
-  row["Score"] = 95.5;
-  row["Active"] = TRUE;
-  row["Time"] = t1;
-  dynAppend(rows, row);
+  time t1, t2;
+  dyn_anytype rows = buildTestRows(t1, t2);
 
-  mapping row2;
-  row2["Name"] = "Bob";
-  row2["Age"] = 25;
-  row2["Score"] = 87.0;
-  row2["Active"] = FALSE;
-  row2["Time"] = t2;
-  dynAppend(rows, row2);
-
-  mapping data;
-  data["People"] = rows;
-  // Write
-  bool ok = excelWriteFile(filename, data);
-
-  if (!ok)
+  if (!excelWriteSheet(filename, "People", rows))
   {
-    DebugN("excelRoundTripTestFile: excelWriteFile failed", filename);
+    DebugTN("excelRoundTripTestSingle: excelWriteSheet failed", filename);
     return FALSE;
   }
 
-  // Read back
-  mapping back = excelReadFile(filename);
-
-  bool pass = TRUE;
-
-  // Value checks (headers enabled by writer)
-  if (back["People"][1]["Name"] != "Alice") pass = FALSE;
-
-  if (back["People"][1]["Age"] != 30) pass = FALSE;
-
-  if (back["People"][1]["Active"] != TRUE) pass = FALSE;
-
-  if (back["People"][1]["Time"] != t1) pass = FALSE;
-
-  if (back["People"][2]["Name"] != "Bob") pass = FALSE;
-
-  if (back["People"][2]["Age"] != 25) pass = FALSE;
-
-  if (back["People"][2]["Active"] != FALSE) pass = FALSE;
-
-  if (back["People"][2]["Time"] != t2) pass = FALSE;
-
-  DebugTN("excelRoundTripTestFile", "file", filename, "pass", pass);
-
-  if (!pass)
+  if (!excelGetSheetNames(filename).contains("People"))
   {
-    DebugTN("excelRoundTripTestFile: read-back data", back);
+    DebugTN("excelRoundTripTestSingle: excelGetSheetNames failed", filename);
+    return FALSE;
   }
 
-  // Cleanup (best-effort)
+  bool pass = checkRows(excelReadSheet(filename, "People"), t1, t2, "excelRoundTripTestSingle");
+  DebugTN("excelRoundTripTestSingle", "file", filename, "pass", pass);
   remove(filename);
+  return pass;
+}
 
+// Round-trip test for excelWriteFile / excelReadFile (multi-sheet API).
+bool excelRoundTripTestFile(string filename = "")
+{
+  if (filename == "")
+  {
+    filename = getTempFile("excelRoundTripTestFile");
+
+    if (filename == "") return FALSE;
+  }
+
+  time t1, t2;
+  mapping data;
+  data["People"] = buildTestRows(t1, t2);
+
+  if (!excelWriteFile(filename, data))
+  {
+    DebugTN("excelRoundTripTestFile: excelWriteFile failed", filename);
+    return FALSE;
+  }
+
+  mapping back = excelReadFile(filename);
+
+  if (!mappingHasKey(back, "People"))
+  {
+    DebugTN("excelRoundTripTestFile: sheet 'People' missing from read-back", mappingKeys(back));
+    return false;
+  }
+
+  bool pass = checkRows(back["People"], t1, t2, "excelRoundTripTestFile");
+  DebugTN("excelRoundTripTestFile", "file", filename, "pass", pass);
+  remove(filename);
   return pass;
 }
